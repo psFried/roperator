@@ -1,6 +1,6 @@
 use crate::handler::{SyncRequst, SyncResponse, Handler};
 use crate::runner::client::{self, Client};
-use crate::config::{UpdateStrategy, K8sType};
+use crate::config::{UpdateStrategy};
 use crate::resource::{ObjectId, InvalidResourceError, JsonObject, object_id, type_ref, K8sTypeRef, ObjectIdRef};
 use crate::runner::controller::{ResourceMessage, EventType, to_raw_api, convert_request};
 use crate::runner::{duration_to_millis, RuntimeConfig, ChildRuntimeConfig};
@@ -13,7 +13,7 @@ use kube::api::PostParams;
 
 use std::sync::Arc;
 use std::time::Instant;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::{self, Display};
 
 
@@ -238,8 +238,8 @@ fn is_child_update_required(child_config: &ChildRuntimeConfig, req: &SyncRequst,
         (Some(existing_child), _) => {
             let diffs = compare_values(existing_child.as_ref(), child);
             if diffs.non_empty() {
-                log::info!("Found diffs in child of parent: {} with type: {} and id: {}, diffs: {}",
-                        parent_id, child_type, child_id, diffs);
+                log::info!("Found {} diffs in child of parent: {} with type: {} and id: {}, diffs: {}",
+                        diffs.len(), parent_id, child_type, child_id, diffs);
             } else {
                 log::debug!("No difference in child of parent: {}, with type: {} and id: {}", parent_id, child_type, child_id);
             }

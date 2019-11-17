@@ -9,16 +9,13 @@ use hyper::Body;
 use hyper_openssl::HttpsConnector;
 use openssl::ssl::{SslConnector, SslMethod};
 use futures_util::TryStreamExt;
-use serde::{Serialize, Deserialize};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use futures::stream::Stream;
 use regex::bytes::Regex;
 use lazy_static::lazy_static;
 
-use std::time::{Instant, Duration};
+use std::time::Instant;
 use std::sync::Arc;
-use std::collections::VecDeque;
 
 
 lazy_static!{
@@ -147,7 +144,7 @@ impl Client {
         }
     }
 
-    pub async fn get_response(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
+    pub async fn get_response(&self, req: Request<Body>) -> Result<Response<Body>, Error> {
         let method = req.method().to_string();
         let uri = req.uri().to_string();
         let start_time = Instant::now();
@@ -155,7 +152,7 @@ impl Client {
         self.private_execute_request(start_time, method.as_str(), uri.as_str(), req).await
     }
 
-    pub async fn get_response_body<T: DeserializeOwned>(&self, mut req: Request<Body>) -> Result<T, Error> {
+    pub async fn get_response_body<T: DeserializeOwned>(&self, req: Request<Body>) -> Result<T, Error> {
         let method = req.method().to_string();
         let uri = req.uri().to_string();
         let start_time = Instant::now();
@@ -294,13 +291,9 @@ pub struct Line<'a> {
 }
 
 impl <'a> Line<'a> {
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
         self.buffer.iter().map(bytes::Bytes::len).sum::<usize>() == 0usize
-    }
-
-    fn pop_first_element(&mut self) {
-        let tmp: &mut [bytes::Bytes] = std::mem::replace(&mut self.buffer, &mut []);
-        self.buffer = &mut tmp[1..];
     }
 }
 

@@ -9,11 +9,10 @@ use crate::config::{OperatorConfig, ClientConfig, K8sType, UpdateStrategy};
 use crate::runner::controller::{ResourceMessage, ResourceMonitor, EventType, LabelToIdIndex, UidToIdIndex};
 use crate::runner::update::RequestHandler;
 use client::Client;
-use crate::handler::{SyncRequst, SyncResponse, Handler};
+use crate::handler::{SyncRequst, Handler};
 
-use serde_json::Value;
 use failure::Error;
-use tokio::sync::mpsc::{Sender, Receiver, channel};
+use tokio::sync::mpsc::{Sender, Receiver};
 use tokio::prelude::*;
 
 use std::time::{Instant, Duration};
@@ -43,12 +42,12 @@ impl RuntimeConfig {
 
 }
 
-pub async fn run(config: OperatorConfig, client_config: ClientConfig, handler: Arc<dyn Handler>) -> Result<(), Error> {
+pub async fn run_operator(config: OperatorConfig, client_config: ClientConfig, handler: Arc<dyn Handler>) -> Result<(), Error> {
     let client = Client::new(client_config)?;
-    run_operator(config, client, handler).await
+    run_with_client(config, client, handler).await
 }
 
-pub async fn run_operator(config: OperatorConfig, client: Client, handler: Arc<dyn Handler>) -> Result<(), Error> {
+async fn run_with_client(config: OperatorConfig, client: Client, handler: Arc<dyn Handler>) -> Result<(), Error> {
     let OperatorConfig {parent, child_types, namespace, operator_name, tracking_label_name, ownership_label_name} = config;
 
     let parent_type = Arc::new(parent);
@@ -213,7 +212,6 @@ impl OperatorState {
         // we'll start to use a much shorter timeout for receiving subsequent messages
         let mut timeout = Duration::from_secs(60);
         let mut total_messages: usize = 0;
-        let mut total_parents: usize = 0;
 
         while let Some(message) = self.recv_next(timeout).await {
             if total_messages == 0 {
@@ -229,7 +227,10 @@ impl OperatorState {
             timeout = Duration::from_millis(500).checked_sub(elapsed).unwrap_or(Duration::from_millis(1));
         }
         let elapsed_millis = duration_to_millis(start_time.elapsed());
-        log::debug!("Received: {} update notifications for {} parents in {}ms", total_messages, total_parents, elapsed_millis);
+        let new_to_sync = to_sync.len() - starting_to_sync_len;
+        let new_to_finalize = to_finalize.len() - starting_to_finalize_len;
+        log::debug!("Received: {} messages to sync {} and finalize {} new parents in {}ms",
+                total_messages, new_to_sync, new_to_finalize, elapsed_millis);
     }
 
     fn handle_received_message(&mut self, message: ResourceMessage, to_sync: &mut HashSet<String>, to_finalize: &mut HashSet<String>) {

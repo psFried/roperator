@@ -1,31 +1,19 @@
-use crate::resource::{K8sResource, ObjectId, ObjectIdRef, InvalidResourceError, K8sTypeRef};
-use crate::config::{K8sType, ChildConfig};
-use crate::handler::Handler;
-use crate::runner::client::{Client, LineDeserializer, Error as ClientError};
+use crate::resource::{K8sResource, ObjectId, ObjectIdRef, InvalidResourceError};
+use crate::config::{K8sType};
+use crate::runner::client::{Client, Error as ClientError};
 
-use kube::api::{Informer, Object, TypeMeta, ListParams, ObjectList, RawApi};
+use kube::api::{ListParams, ObjectList, RawApi};
 
 use serde_json::Value;
 use tokio::sync::{Mutex, MutexGuard};
-use tokio::sync::mpsc::{Sender, Receiver, channel, error::SendError};
+use tokio::sync::mpsc::{Sender, error::SendError};
 use failure::Error;
 use http::Request;
 use hyper::Body;
 
-use std::borrow::{Borrow, Cow};
 use std::sync::{Arc};
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-
-// type K8sResource = Object<Value, Value>;
-
-
-
-// impl <'a> std::borrow::Borrow<ObjectIdRef<'a>> for ObjectId {
-//     fn borrow(&self) -> &ObjectIdRef<'a> {
-//         &(*self)
-//     }
-// }
 
 
 #[derive(Debug)]
@@ -43,18 +31,6 @@ impl ResourceCache {
 
     pub fn get_copy(&self, id: &ObjectIdRef) -> Option<K8sResource> {
         self.0.get(id).cloned()
-    }
-
-    pub fn get_all(&self) -> Vec<K8sResource> {
-        self.0.values().cloned().collect()
-    }
-
-    pub fn get<'a, 'b>(&'a self, id: &'b ObjectId) -> Option<&'a K8sResource> {
-        self.0.get(id)
-    }
-
-    pub fn remove(&mut self, id: &ObjectId) -> Option<K8sResource> {
-        self.0.remove(id)
     }
 
     pub fn clear(&mut self) {
@@ -85,7 +61,7 @@ impl ReverseIndex for LabelToIdIndex {
     }
 
     fn insert(&mut self, key: &str, res: &K8sResource) {
-        let mut set = self.entries.entry(key.to_owned()).or_insert(HashSet::new());
+        let set = self.entries.entry(key.to_owned()).or_insert(HashSet::new());
         let id = res.get_object_id();
         if !set.contains(&id) {
             set.insert(id.into_owned());
@@ -177,26 +153,12 @@ impl <I: ReverseIndex> CacheAndIndex<I> {
         }
     }
 
-    fn get_all(&self) -> Vec<K8sResource> {
-        self.cache.get_all()
-    }
-
-    pub fn get_resource<'a, 'b>(&'a self, id: &'b ObjectId) -> Option<&'a K8sResource> {
-        self.cache.get(id)
-    }
-
     fn add(&mut self, resource: K8sResource) {
         if let Some(key) = self.index.get_key(&resource) {
             self.index.insert(key, &resource);
         }
         self.cache.insert(resource);
     }
-
-    fn remove_one(&mut self, index_key: &str, id: &ObjectId) {
-        self.index.remove_one(index_key, id);
-        self.cache.remove(id);
-    }
-
 
     fn clear_all(&mut self) {
         self.index.clear();
@@ -215,15 +177,6 @@ impl CacheAndIndex<UidToIdIndex> {
 }
 
 impl CacheAndIndex<LabelToIdIndex> {
-    fn remove_all(&mut self, index_key: &str)  {
-        if let Some(ids) = self.index.remove_all(index_key) {
-            for id in ids {
-                self.cache.remove(&id);
-            }
-
-        }
-    }
-
     pub fn get_all_resources_by_index_key(&self, key: &str) -> Vec<K8sResource> {
         let mut results = Vec::new();
         if let Some(ids) = self.index.lookup(key) {
@@ -243,7 +196,6 @@ pub enum EventType {
     Updated,
     Deleted,
     UpdateOperationComplete,
-    CacheRefreshed,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -256,16 +208,6 @@ pub struct ResourceMessage {
 
 
 pub struct ResourceState<'a, I: ReverseIndex>(MutexGuard<'a, CacheAndIndex<I>>);
-impl <'a, I: ReverseIndex> ResourceState<'a, I> {
-
-    pub fn get_all(&self) -> Vec<K8sResource> {
-        self.0.get_all()
-    }
-
-    pub fn get_by_id(&'a self, id: &ObjectId) -> Option<&'a K8sResource> {
-        self.0.get_resource(id)
-    }
-}
 
 impl <'a> ResourceState<'a, UidToIdIndex> {
     pub fn get_by_uid(&self, uid: &str) -> Option<K8sResource> {
@@ -387,7 +329,7 @@ async fn start_monitor<I: ReverseIndex>(index: I, list_params: ListParams, k8s_t
     let mut raw_api = to_raw_api(&*k8s_type);
     raw_api.namespace = namespace;
 
-    let mut backend = ResourceMonitorBackend {
+    let backend = ResourceMonitorBackend {
         raw_api,
         cache_and_index,
         client,
@@ -396,7 +338,7 @@ async fn start_monitor<I: ReverseIndex>(index: I, list_params: ListParams, k8s_t
         list_params,
     };
     hyper::rt::spawn(async move {
-        backend.run();
+        backend.run().await;
     });
     frontend
 }
@@ -431,12 +373,16 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
                     let result = self.run_inner(resource_version).await;
                     log::info!("Watch ended with result: {:?}", result);
                     if let Err(err) = result {
-                        self.handle_error(err).await || break;
+                        if !self.handle_error(err).await {
+                            break;
+                        }
                     }
                 }
                 Err(err) => {
                     log::error!("Error seeding cache for type: {:?}: {:?}", self.k8s_type, err);
-                    self.handle_error(err).await || break;
+                    if !self.handle_error(err).await {
+                        break;
+                    }
                 }
             }
         }

@@ -101,15 +101,6 @@ impl K8sResource {
         self.0.pointer("/metadata/generation").and_then(Value::as_i64).unwrap_or(-1)
     }
 
-    fn validate_self(&self) -> Result<(), InvalidResourceError> {
-        K8sResource::validate(&self.0).map_err(|e| {
-            InvalidResourceError {
-                message: e,
-                value: self.0.clone(),
-            }
-        })
-    }
-
     fn validate(value: &Value) -> Result<(), &'static str> {
         value.pointer("/metadata/resourceVersion").ok_or("missing metadata.resourceVersion")?;
         value.pointer("/metadata/name").ok_or("missing metadata.name")?;

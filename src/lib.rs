@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-// TODO: remove dead code and allow directive
-
 #[macro_use] extern crate serde_derive;
 
 mod runner;
@@ -10,6 +7,8 @@ pub mod config;
 pub mod handler;
 
 pub use serde_json;
+
+pub use crate::runner::run_operator;
 
 #[cfg(test)]
 mod tests {
