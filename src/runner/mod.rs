@@ -9,7 +9,7 @@ use crate::config::{OperatorConfig, ClientConfig, K8sType, UpdateStrategy};
 use crate::runner::controller::{ResourceMessage, ResourceMonitor, EventType, LabelToIdIndex, UidToIdIndex};
 use crate::runner::update::RequestHandler;
 use client::Client;
-use crate::handler::{SyncRequst, Handler};
+use crate::handler::{SyncRequest, Handler};
 
 use failure::Error;
 use tokio::sync::mpsc::{Sender, Receiver};
@@ -42,9 +42,13 @@ impl RuntimeConfig {
 
 }
 
-pub async fn run_operator(config: OperatorConfig, client_config: ClientConfig, handler: Arc<dyn Handler>) -> Result<(), Error> {
-    let client = Client::new(client_config)?;
-    run_with_client(config, client, handler).await
+pub fn run_operator(config: OperatorConfig, client_config: ClientConfig, handler: Arc<dyn Handler>) -> Result<(), Error> {
+    let runtime = tokio::runtime::Runtime::new()?;
+
+    runtime.block_on(async move {
+        let client = Client::new(client_config)?;
+        run_with_client(config, client, handler).await
+    })
 }
 
 async fn run_with_client(config: OperatorConfig, client: Client, handler: Arc<dyn Handler>) -> Result<(), Error> {
@@ -168,7 +172,7 @@ impl OperatorState {
         let parent_id = parent.get_object_id().into_owned();
         self.in_progress_updates.insert(parent_uid.to_owned(), InProgressUpdate::new(parent_id));
 
-        let request = SyncRequst { parent: parent, children };
+        let request = SyncRequest { parent: parent, children };
         let handler = RequestHandler {
             sender: self.sender.clone(),
             request,

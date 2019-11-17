@@ -140,15 +140,15 @@ impl std::fmt::Display for K8sResource {
 }
 
 pub fn object_id(json: &Value) -> Option<ObjectIdRef> {
-    let namespace = str_value(json, "/metadata/namspace").unwrap_or("");
+    let namespace = str_value(json, "/metadata/namespace").unwrap_or("");
     str_value(json, "/metadata/name").map(|name| {
         ObjectIdRef::new(namespace, name)
     })
 }
 
 pub fn type_ref(json: &Value) -> Option<K8sTypeRef> {
-    str_value(json, "apiVersion").and_then(|api_version| {
-        str_value(json, "kind").map(|kind| {
+    str_value(json, "/apiVersion").and_then(|api_version| {
+        str_value(json, "/kind").map(|kind| {
             K8sTypeRef::new(api_version, kind)
         })
     })

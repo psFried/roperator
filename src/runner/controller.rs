@@ -1,15 +1,11 @@
 use crate::resource::{K8sResource, ObjectId, ObjectIdRef, InvalidResourceError};
 use crate::config::{K8sType};
-use crate::runner::client::{Client, Error as ClientError};
-
-use kube::api::{ListParams, ObjectList, RawApi};
+use crate::runner::client::{Client, Error as ClientError, WatchEvent, ApiError, ObjectList};
 
 use serde_json::Value;
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::sync::mpsc::{Sender, error::SendError};
 use failure::Error;
-use http::Request;
-use hyper::Body;
 
 use std::sync::{Arc};
 use std::collections::{HashMap, HashSet};
@@ -313,58 +309,46 @@ impl From<SendError> for MonitorBackendErr {
 
 
 pub async fn start_child_monitor(label_name: String, namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>) -> ResourceMonitor<LabelToIdIndex> {
-    let list_params = make_child_list_params(&label_name);
-    let index = LabelToIdIndex::new(label_name);
-    start_monitor(index, list_params, k8s_type, namespace, client, sender).await
+    let index = LabelToIdIndex::new(label_name.clone());
+    start_monitor(index, k8s_type, namespace, Some(label_name), client, sender).await
 }
 
 pub async fn start_parent_monitor(namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>) -> ResourceMonitor<UidToIdIndex> {
-    start_monitor(UidToIdIndex::new(), ListParams::default(), k8s_type, namespace, client, sender).await
+    start_monitor(UidToIdIndex::new(), k8s_type, namespace, None, client, sender).await
 }
 
-async fn start_monitor<I: ReverseIndex>(index: I, list_params: ListParams, k8s_type: Arc<K8sType>, namespace: Option<String>, client: Client, sender: Sender<ResourceMessage>) -> ResourceMonitor<I> {
+async fn start_monitor<I: ReverseIndex>(index: I, k8s_type: Arc<K8sType>, namespace: Option<String>, label_selector: Option<String>, client: Client, sender: Sender<ResourceMessage>) -> ResourceMonitor<I> {
 
     let cache_and_index = Arc::new(Mutex::new(CacheAndIndex::new(index)));
     let frontend = ResourceMonitor { cache_and_index: cache_and_index.clone() };
-    let mut raw_api = to_raw_api(&*k8s_type);
-    raw_api.namespace = namespace;
 
     let backend = ResourceMonitorBackend {
-        raw_api,
         cache_and_index,
         client,
         k8s_type,
         sender,
-        list_params,
+        label_selector,
+        namespace,
     };
-    hyper::rt::spawn(async move {
+    tokio::spawn(async move {
         backend.run().await;
     });
     frontend
-}
-
-fn make_child_list_params(label_selector: &str) -> ListParams {
-    ListParams {
-        label_selector: Some(urlencoding::encode(label_selector)),
-        timeout: Some(30),
-        field_selector: None,
-        include_uninitialized: false,
-    }
 }
 
 struct ResourceMonitorBackend<I: ReverseIndex> {
     cache_and_index: Arc<Mutex<CacheAndIndex<I>>>,
     client: Client,
     k8s_type: Arc<K8sType>,
-    raw_api: RawApi,
     sender: Sender<ResourceMessage>,
-    list_params: ListParams,
+    label_selector: Option<String>,
+    namespace: Option<String>,
 }
 
 impl <I: ReverseIndex> ResourceMonitorBackend<I> {
 
     async fn run(mut self) {
-        log::debug!("Starting monitoring resources of type: {:?} with selector: {:?}", self.k8s_type, self.list_params.label_selector);
+        log::debug!("Starting monitoring resources of type: {:?} with selector: {:?}", self.k8s_type, self.label_selector);
 
         loop {
             let result = self.seed_cache().await;
@@ -428,9 +412,11 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
 
     async fn do_watch(&mut self, resource_version: &str) -> Result<Option<String>, MonitorBackendErr> {
         log::debug!("Starting watch of: {:?} with resourceVersion: {:?}", self.k8s_type, resource_version);
-        let req = self.raw_api.watch(&self.list_params, resource_version).unwrap();
 
-        let mut lines = self.client.get_response_lines_deserialized::<WatchEvent>(convert_request(req)).await?;
+        let mut lines = self.client.watch(&*self.k8s_type,
+                self.namespace.as_ref().map(String::as_str),
+                Some(resource_version),
+                self.label_selector.as_ref().map(String::as_str)).await?;
 
         let mut new_version: Option<String> = None;
         loop {
@@ -471,17 +457,17 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
     }
 
     async fn seed_cache(&mut self) -> Result<String, MonitorBackendErr> {
-        log::info!("Seeding resources of type: {:?} with selector: {:?}", self.k8s_type, self.list_params.label_selector);
+        log::info!("Seeding resources of type: {:?} with selector: {:?}", self.k8s_type, self.label_selector);
         // lock the cache now and hold it until we're done, so that consumers don't get an inconsistent view of it
         let mut cache_and_index = self.cache_and_index.lock().await;
         cache_and_index.is_initialized = false;
         cache_and_index.clear_all();
 
+
+        let list = self.client.list_all(&*self.k8s_type, self.namespace.as_ref().map(String::as_str), self.label_selector.as_ref().map(String::as_str)).await?;
         // safe unwrap since RawApi can only fail when setting the request body, but it's hard coded to an empty veec
-        let req = self.raw_api.list(&self.list_params).unwrap();
-        let list: ObjectList<Value> = self.client.get_response_body(convert_request(req)).await?;
         let ObjectList {metadata, items} = list;
-        let resource_version = metadata.resourceVersion.ok_or_else(|| {
+        let resource_version = metadata.resource_version.ok_or_else(|| {
             InvalidResourceError {
                 message: "list result from api server is missing metadata.resourceVersion",
                 value: Value::Null,
@@ -499,52 +485,4 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         Ok(resource_version)
     }
 
-}
-
-
-#[derive(Deserialize, Serialize, Clone)]
-#[serde(tag = "type", content = "object", rename_all = "UPPERCASE")]
-enum WatchEvent {
-    Added(Value),
-    Modified(Value),
-    Deleted(Value),
-    Error(ApiError),
-}
-
-
-#[derive(Deserialize, Serialize, Debug, Clone, Eq, PartialEq)]
-pub struct ApiError {
-    pub status: String,
-    #[serde(default)]
-    pub message: String,
-    #[serde(default)]
-    pub reason: String,
-    pub code: u16,
-}
-
-impl std::fmt::Display for ApiError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Api Error: status: '{}', code: {}, reason: '{}', message: '{}'", self.status, self.code, self.reason, self.message)
-    }
-}
-impl std::error::Error for ApiError { }
-
-pub(crate) fn convert_request(req: Request<Vec<u8>>) -> Request<Body> {
-    let (parts, bod) = req.into_parts();
-    Request::from_parts(parts, Body::from(bod))
-}
-
-pub(crate) fn to_raw_api(k8s_type: &K8sType) -> kube::api::RawApi {
-    let prefix = if k8s_type.group.len() > 0 {
-        "apis"
-    } else {
-        "api"
-    };
-    kube::api::RawApi {
-        resource: k8s_type.plural_kind.clone(),
-        group: k8s_type.group.clone(),
-        namespace: None,
-        version: k8s_type.version.clone(),
-        prefix: prefix.to_owned(),
-    }
 }

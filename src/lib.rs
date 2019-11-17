@@ -7,6 +7,7 @@ pub mod config;
 pub mod handler;
 
 pub use serde_json;
+pub use serde;
 
 pub use crate::runner::run_operator;
 

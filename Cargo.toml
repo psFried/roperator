@@ -31,5 +31,9 @@ url = "2.1.0"
 futures-preview = { version = "=0.3.0-alpha.19", features = ["compat"] }
 urlencoding = "1.0.0"
 kube = { version = "0.17.0", features = ["openapi"] }
+
+[dev-dependencies]
+serde_derive = "1.0.101"
 k8s-openapi = { version = "0.6.0", default-features = false, features = ["v1_15"] }
+env_logger = "*"
 

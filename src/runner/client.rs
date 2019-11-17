@@ -10,6 +10,7 @@ use hyper_openssl::HttpsConnector;
 use openssl::ssl::{SslConnector, SslMethod};
 use futures_util::TryStreamExt;
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde_json::Value;
 use regex::bytes::Regex;
 use lazy_static::lazy_static;
@@ -105,6 +106,21 @@ impl Client {
         Ok(Client(Arc::new(inner)))
     }
 
+    pub async fn list_all(&self, k8s_type: &K8sType, namespace: Option<&str>, label_selector: Option<&str>) -> Result<ObjectList<Value>, Error> {
+        let req = request::list_request(&self.0.config, k8s_type, label_selector, namespace)?;
+        self.get_response_body(req).await
+    }
+
+    pub async fn watch(&self, k8s_type: &K8sType, namespace: Option<&str>, resource_version: Option<&str>, label_selector: Option<&str>) -> Result<LineDeserializer<WatchEvent>, Error> {
+        let req = request::watch_request(&self.0.config, k8s_type, resource_version, label_selector, None, namespace)?;
+        self.get_response_lines_deserialized(req).await
+    }
+
+    pub async fn update_status(&self, k8s_type: &K8sType, id: &ObjectIdRef<'_>, new_status: &Value) -> Result<(), Error> {
+        let req = request::update_status_request(&self.0.config, k8s_type, id, new_status)?;
+        self.execute_ensure_success(req).await
+    }
+
     pub async fn delete_resource(&self, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<(), Error> {
         log::info!("Deleting resouce '{}' with type: {}", id, k8s_type);
         let req = request::delete_request(&self.0.config, k8s_type, id)?;
@@ -126,7 +142,14 @@ impl Client {
         if response.status().is_success() {
             Ok(())
         } else {
-            Err(Error::http(response.status().clone()))
+            let status = response.status().clone();
+            let body = response.into_body().try_concat().await?;
+            if let Ok(as_str) = std::str::from_utf8(&body) {
+                log::error!("Response status: {}, body: {}", status, as_str);
+            } else {
+                log::error!("Response status: {}, binary body with {} bytes", status, body.len());
+            }
+            Err(Error::http(status))
         }
     }
 
@@ -199,18 +222,6 @@ impl Client {
         Ok(deserialized)
     }
 }
-
-// pub struct MultiValueResponse<T> {
-//     body: Body,
-//     _phantom: std::marker::PhantomData<T>,
-// }
-
-// impl <T: DeserializeOwned> MultiValueResponse<T> {
-
-//     pub async fn next(&mut self) -> Option<Result<T, Error>> {
-
-//     }
-// }
 
 pub struct Lines {
     body: Body,
@@ -350,6 +361,44 @@ impl <T: DeserializeOwned> LineDeserializer<T> {
     }
 }
 
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(tag = "type", content = "object", rename_all = "UPPERCASE")]
+pub enum WatchEvent {
+    Added(Value),
+    Modified(Value),
+    Deleted(Value),
+    Error(ApiError),
+}
+
+
+#[derive(Deserialize, Serialize, Debug, Clone, Eq, PartialEq)]
+pub struct ApiError {
+    pub status: String,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub reason: String,
+    pub code: u16,
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Api Error: status: '{}', code: {}, reason: '{}', message: '{}'", self.status, self.code, self.reason, self.message)
+    }
+}
+impl std::error::Error for ApiError { }
+
+#[derive(Debug, Deserialize, PartialEq, Clone)]
+pub struct ListMeta {
+    #[serde(rename = "resourceVersion")]
+    pub resource_version: Option<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Clone)]
+pub struct ObjectList<T> {
+    pub metadata: ListMeta,
+    pub items: Vec<T>,
+}
 
 #[cfg(test)]
 mod test {

@@ -29,6 +29,21 @@ pub fn replace_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &Ob
     Ok(req)
 }
 
+pub fn update_status_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &ObjectIdRef<'_>, new_status: &Value) -> Result<Request<Body>, Error> {
+
+    let mut url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
+    {
+        let mut path = url.path_segments_mut().unwrap();
+        path.push("status");
+    }
+    let as_vec = serde_json::to_vec(new_status)?;
+    let req = Request::put(url.into_string())
+            .header(header::AUTHORIZATION, client_config.service_account_token.as_str())
+            .body(Body::from(as_vec))
+            .unwrap();
+    Ok(req)
+}
+
 pub fn delete_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
     let req = Request::delete(url.into_string())
