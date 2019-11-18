@@ -218,6 +218,11 @@ impl Client {
             return Err(Error::http(response.status().clone()));
         }
         let body = response.into_body().try_concat().await?;
+
+        if log::log_enabled!(log::Level::Trace) {
+            let as_str = String::from_utf8_lossy(&body);
+            log::trace!("Got response body: {}", as_str);
+        }
         let deserialized = serde_json::from_slice(&body)?;
         Ok(deserialized)
     }

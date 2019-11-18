@@ -476,7 +476,14 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
 
         for object in items {
             let resource = K8sResource::from_value(object)?;
+            let index_key = cache_and_index.index.get_key(&resource).map(String::from);
+            let event_type = EventType::Updated;
+            let resource_type = self.k8s_type.clone();
+            let resource_id = resource.get_object_id().into_owned();
+            let message = ResourceMessage { event_type, resource_type, resource_id, index_key };
+
             cache_and_index.add(resource);
+            self.sender.send(message).await?;
         }
 
         // set the initialization flag, which will allow the frontend to read from the cache

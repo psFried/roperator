@@ -3,10 +3,11 @@ use crate::config::K8sType;
 use serde_json::Value;
 
 use std::borrow::Cow;
+use std::fmt::{self, Debug};
 
 pub type JsonObject = serde_json::Map<String, Value>;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(PartialEq, Clone)]
 pub struct InvalidResourceError {
     pub message: &'static str,
     pub value: Value,
@@ -18,7 +19,13 @@ impl InvalidResourceError {
     }
 }
 
-impl std::fmt::Display for InvalidResourceError {
+impl Debug for InvalidResourceError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "InvalidResourceError('{}', {})", self.message, self.value)
+    }
+}
+
+impl fmt::Display for InvalidResourceError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "Invalid Resource: {}", self.message)
     }
@@ -27,9 +34,21 @@ impl std::fmt::Display for InvalidResourceError {
 impl std::error::Error for InvalidResourceError { }
 
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct K8sResource(Value);
+
+impl Debug for K8sResource {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::fmt::Display for K8sResource {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl K8sResource {
 
@@ -133,11 +152,6 @@ impl Into<Value> for K8sResource {
     }
 }
 
-impl std::fmt::Display for K8sResource {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
 
 pub fn object_id(json: &Value) -> Option<ObjectIdRef> {
     let namespace = str_value(json, "/metadata/namespace").unwrap_or("");
@@ -206,7 +220,7 @@ impl <'a> K8sTypeRef<'a> {
 
 impl <'a> std::fmt::Display for K8sTypeRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.0.fmt(f)
+        write!(f, "{}", self.0)
     }
 }
 
@@ -272,7 +286,7 @@ pub type ObjectId = ObjectIdRef<'static>;
 
 impl <'a> std::fmt::Display for ObjectIdRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.0.fmt(f)
+        write!(f, "{}", self.0)
     }
 }
 
