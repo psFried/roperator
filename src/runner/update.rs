@@ -2,7 +2,7 @@ use crate::handler::{SyncRequest, SyncResponse, Handler};
 use crate::runner::client::{self, Client};
 use crate::config::{UpdateStrategy};
 use crate::resource::{ObjectId, InvalidResourceError, JsonObject, object_id, type_ref, K8sTypeRef, ObjectIdRef};
-use crate::runner::controller::{ResourceMessage, EventType};
+use crate::runner::informer::{ResourceMessage, EventType};
 use crate::runner::{duration_to_millis, RuntimeConfig, ChildRuntimeConfig};
 use crate::runner::compare::{compare_values};
 

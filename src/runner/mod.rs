@@ -1,4 +1,4 @@
-mod controller;
+mod informer;
 mod update;
 mod compare;
 mod client;
@@ -6,7 +6,7 @@ mod request;
 
 use crate::resource::{K8sResource, ObjectId, K8sTypeRef};
 use crate::config::{OperatorConfig, ClientConfig, K8sType, UpdateStrategy};
-use crate::runner::controller::{ResourceMessage, ResourceMonitor, EventType, LabelToIdIndex, UidToIdIndex};
+use crate::runner::informer::{ResourceMessage, ResourceMonitor, EventType, LabelToIdIndex, UidToIdIndex};
 use crate::runner::update::RequestHandler;
 use client::Client;
 use crate::handler::{SyncRequest, Handler};
@@ -58,7 +58,7 @@ async fn run_with_client(config: OperatorConfig, client: Client, handler: Arc<dy
 
     let (tx, rx) = tokio::sync::mpsc::channel::<ResourceMessage>(1024);
 
-    let parent_monitor = controller::start_parent_monitor(namespace.clone(), parent_type.clone(), client.clone(), tx.clone()).await;
+    let parent_monitor = informer::start_parent_monitor(namespace.clone(), parent_type.clone(), client.clone(), tx.clone()).await;
 
     let mut child_runtime_config = HashMap::with_capacity(4);
     let mut children = HashMap::with_capacity(4);
@@ -71,7 +71,7 @@ async fn run_with_client(config: OperatorConfig, client: Client, handler: Arc<dy
             update_strategy: child_conf.update_strategy,
         };
         child_runtime_config.insert(type_key, runtime_conf);
-        let child_monitor = controller::start_child_monitor(tracking_label_name.clone(), namespace.clone(),
+        let child_monitor = informer::start_child_monitor(tracking_label_name.clone(), namespace.clone(),
                 child_type.clone(), client.clone(), tx.clone()).await;
         children.insert(child_type, child_monitor);
     }
