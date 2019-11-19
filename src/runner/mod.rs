@@ -136,11 +136,13 @@ impl OperatorState {
             log::debug!("Starting sync loop with {} existing parents needing to sync", parent_ids_to_sync.len());
             self.get_parent_uids_to_update(&mut parent_ids_to_sync, &mut deleted_parent_ids).await;
             for parent_uid in parent_ids_to_sync.iter() {
-                let result = self.sync_parent(parent_uid.as_str(), handler.clone()).await;
-                if let Err(err) = result {
-                    log::error!("Cannot sync parent with uid: {} due to error: {:?}", parent_uid, err);
-                } else {
-                    synced_parents.insert(parent_uid.clone());
+                if !self.is_update_in_progress(parent_uid) {
+                    let result = self.sync_parent(parent_uid.as_str(), handler.clone()).await;
+                    if let Err(err) = result {
+                        log::error!("Cannot sync parent with uid: {} due to error: {:?}", parent_uid, err);
+                    } else {
+                        synced_parents.insert(parent_uid.clone());
+                    }
                 }
             }
 
@@ -152,7 +154,6 @@ impl OperatorState {
         }
     }
 
-
     fn is_update_in_progress(&self, parent_uid: &str) -> bool {
         self.in_progress_updates.contains_key(parent_uid)
     }
@@ -162,7 +163,7 @@ impl OperatorState {
             Some(p) => p,
             None => {
                 log::warn!("Cannot sync parent with uid: '{}' because resource has been subsequently deleted", parent_uid);
-                return Ok(());
+                return self.ensure_children_deleted(parent_uid).await
             }
         };
         let children = self.get_all_children(parent_uid).await?;
@@ -182,6 +183,12 @@ impl OperatorState {
         };
         handler.handle_update();
 
+        Ok(())
+    }
+
+    async fn ensure_children_deleted(&mut self, parent_uid: &str) -> Result<(), Error> {
+        let _kids = self.get_all_children(parent_uid).await?;
+        unimplemented!();
         Ok(())
     }
 
@@ -253,18 +260,11 @@ impl OperatorState {
                 } else {
                     log::error!("Got updateOperationComplete when there was no in-progress operation for uid: {}", uid);
                 }
-                if !to_finalize.contains(&uid) {
-                    to_sync.insert(uid);
-                } else {
-                    log::info!("Sync operation just completed for a parent that was just deleted, will finalize parent: {}", uid);
-                }
             }
             _ => {
                 // TODO: If this is a parent type, then look at deletionTimestamp to see if the object needs to be finalized, also remove our finalizer from the list when we finalize it
-                if !self.is_update_in_progress(uid.as_str()) {
-                    if to_sync.insert(uid) {
-                        log::info!("Triggering sync due to event: {:?}, on resource: {} {} ", event_type, resource_type, resource_id);
-                    }
+                if to_sync.insert(uid) {
+                    log::info!("Triggering sync due to event: {:?}, on resource: {} {} ", event_type, resource_type, resource_id);
                 }
             }
         }
