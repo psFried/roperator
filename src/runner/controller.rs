@@ -474,7 +474,8 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
             }
         })?;
 
-        for object in items {
+        for mut object in items {
+            self.add_metadata_to_list_object(&mut object)?;
             let resource = K8sResource::from_value(object)?;
             let index_key = cache_and_index.index.get_key(&resource).map(String::from);
             let event_type = EventType::Updated;
@@ -492,4 +493,18 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         Ok(resource_version)
     }
 
+    /// For some reason, it seems that apiVersion and kind are missing from the individual response items in the list response
+    fn add_metadata_to_list_object(&self, list_object: &mut Value) -> Result<(), InvalidResourceError> {
+        match list_object.as_object_mut() {
+            Some(obj) => {
+                obj.insert("apiVersion".to_owned(), self.k8s_type.format_api_version().into());
+                obj.insert("kind".to_owned(), self.k8s_type.kind.clone().into());
+                Ok(())
+            }
+            None => {
+                Err(InvalidResourceError::new("list item must be an object", list_object.clone()))
+            }
+        }
+    }
 }
+
