@@ -2,7 +2,6 @@ mod informer;
 mod update;
 mod compare;
 mod client;
-mod request;
 
 use crate::resource::{K8sResource, ObjectId, K8sTypeRef};
 use crate::config::{OperatorConfig, ClientConfig, K8sType, UpdateStrategy};
