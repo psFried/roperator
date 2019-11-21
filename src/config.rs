@@ -82,10 +82,11 @@ pub struct ClientConfig {
     pub api_server_endpoint: String,
     pub service_account_token: String,
     pub ca_file_path: Option<String>,
+    pub user_agent: String,
 }
 
 impl ClientConfig {
-    pub fn from_service_account() -> Result<ClientConfig, Error> {
+    pub fn from_service_account(user_agent: String) -> Result<ClientConfig, Error> {
         use std::io::Read;
         use std::fs::File;
 
@@ -104,6 +105,7 @@ impl ClientConfig {
             api_server_endpoint,
             service_account_token,
             ca_file_path,
+            user_agent,
         })
     }
 }

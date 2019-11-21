@@ -1,96 +1,51 @@
-use crate::handler::{SyncRequest, SyncResponse, Handler};
+use crate::handler::{SyncRequest, SyncResponse};
 use crate::runner::client::{self, Client};
-use crate::config::{UpdateStrategy};
-use crate::resource::{ObjectId, InvalidResourceError, JsonObject, object_id, type_ref, K8sTypeRef, ObjectIdRef};
+use crate::config::{UpdateStrategy, K8sType};
+use crate::resource::{K8sResource, ObjectId, InvalidResourceError, JsonObject, object_id, type_ref, K8sTypeRef, ObjectIdRef};
 use crate::runner::informer::{ResourceMessage, EventType};
 use crate::runner::{duration_to_millis, RuntimeConfig, ChildRuntimeConfig};
-use crate::runner::compare::{compare_values};
+use crate::runner::reconcile::compare::{compare_values};
+use crate::runner::reconcile::{SyncHandler, UpdateError, update_status_if_different};
 
 use tokio::timer::delay_for;
-use tokio::sync::mpsc::Sender;
 use serde_json::{json, Value};
 
 use std::sync::Arc;
 use std::time::Instant;
 use std::collections::HashSet;
-use std::fmt::{self, Display};
 
 
-#[derive(Debug)]
-pub enum UpdateError {
-    Client(client::Error),
-    InvalidHandlerResponse(InvalidResourceError),
-    UnknownChildType(K8sTypeRef<'static>),
-}
-
-impl Display for UpdateError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            UpdateError::Client(e) => write!(f, "Client Error: {}", e),
-            UpdateError::InvalidHandlerResponse(e) => write!(f, "Invalid response from Handler: {}", e),
-            UpdateError::UnknownChildType(child_type) => write!(f, "No configuration exists for child with type: {}", child_type),
-        }
-    }
-}
-
-impl From<client::Error> for UpdateError {
-    fn from(err: client::Error) -> UpdateError {
-        UpdateError::Client(err)
-    }
-}
-
-impl From<InvalidResourceError> for UpdateError {
-    fn from(err: InvalidResourceError) -> UpdateError {
-        UpdateError::InvalidHandlerResponse(err)
-    }
-}
-
-pub struct RequestHandler {
-    pub sender: Sender<ResourceMessage>,
-    pub request: SyncRequest,
-    pub handler: Arc<dyn Handler>,
-    pub client: Client,
-    pub runtime_config: Arc<RuntimeConfig>,
-    pub parent_index_key: String,
-}
 
 
-impl RequestHandler {
-
-    pub fn handle_update(self) {
-        let RequestHandler { mut sender, request, handler, client, runtime_config, parent_index_key } = self;
+pub async fn handle_sync(handler: SyncHandler) {
+        let SyncHandler { mut sender, request, handler, client, runtime_config, parent_index_key } = handler;
         let parent_id = request.parent.get_object_id().into_owned();
 
         let start_time = Instant::now();
+        let (request, response) = {
+            tokio_executor::blocking::run(move || {
+                let result = handler.sync(&request);
+                log::debug!("finished invoking handler for parent: {} in {}ms", request.parent.get_object_id(), duration_to_millis(start_time.elapsed()));
+                (request, result)
+            }).await
+        };
 
-        tokio::spawn(async move {
-
-            let (request, response) = {
-                tokio_executor::blocking::run(move || {
-                    let result = handler.sync(&request);
-                    log::debug!("finished invoking handler for parent: {} in {}ms", request.parent.get_object_id(), duration_to_millis(start_time.elapsed()));
-                    (request, result)
-                }).await
-            };
-
-            let result = update_all(request, response, client, runtime_config.clone()).await;
-            if let Err(err) = result {
-                log::error!("Error while syncing parent: {}: {:?}", parent_id, err);
-                // we'll delay for a while before sending the message that we've finished so that we can
-                // prevent the main loop from re-trying too soon. Eventually we should implement a backoff
-                delay_for(std::time::Duration::from_secs(10)).await;
-            } else {
-                log::info!("Finished sync for parent: {}", parent_id);
-            }
-            let message = ResourceMessage {
-                event_type: EventType::UpdateOperationComplete,
-                resource_id: parent_id,
-                resource_type: runtime_config.parent_type.clone(),
-                index_key: Some(parent_index_key),
-            };
-            let _ = sender.send(message).await;
-        });
-    }
+        let result = update_all(request, response, client, runtime_config.clone()).await;
+        if let Err(err) = result {
+            log::error!("Error while syncing parent: {}: {:?}", parent_id, err);
+            // we'll delay for a while before sending the message that we've finished so that we can
+            // prevent the main loop from re-trying too soon. Eventually we should implement a backoff
+            delay_for(std::time::Duration::from_secs(10)).await;
+        } else {
+            log::info!("Finished sync for parent: {}", parent_id);
+        }
+        let message = ResourceMessage {
+            event_type: EventType::UpdateOperationComplete,
+            resource_id: parent_id,
+            resource_type: runtime_config.parent_type.clone(),
+            index_key: Some(parent_index_key),
+        };
+        let _ = sender.send(message).await;
 }
 
 
@@ -114,51 +69,13 @@ async fn update_all(request: SyncRequest, handler_response: SyncResponse, client
 async fn delete_undesired_children(client: &Client, runtime_config: &RuntimeConfig, desired_children: &HashSet<ObjectId>, sync_request: &SyncRequest) -> Result<(), client::Error> {
     for existing_child in sync_request.children.iter() {
         let child_id = existing_child.get_object_id();
-        if !desired_children.contains(&child_id) {
+        if !desired_children.contains(&child_id) && !existing_child.is_deletion_timestamp_set() {
             log::info!("Need to delete child: {} of parent: {} because it was not included in the handler response",
                     child_id, sync_request.parent.get_object_id());
             let child_type = runtime_config.type_for(&existing_child.get_type_ref())
                     .expect("No configuration found for existing child type");
             client.delete_resource(child_type, &child_id).await?;
         }
-    }
-    Ok(())
-}
-
-async fn update_status_if_different(parent_id: &ObjectId, parent_resource_version: &str, client: &Client, runtime_config: &RuntimeConfig, current_gen: i64, old_status: Option<&Value>, mut new_status: Value) -> Result<(), UpdateError> {
-    if let Some(s) = new_status.as_object_mut() {
-        s.insert("observedGeneration".to_owned(), current_gen.into());
-    }
-    let should_update = if let Some(old) = old_status {
-        let diffs = compare_values(old, &new_status);
-        let update_required = diffs.non_empty();
-        if update_required {
-            log::info!("Found diffs in existing vs desired status for parent: {}: {}", parent_id, diffs);
-        } else {
-            log::debug!("Current and desired status are the same for parent: {}", parent_id);
-        }
-        update_required
-    } else {
-        log::info!("Current status for parent: {} is null", parent_id);
-        !new_status.is_null()
-    };
-
-    let mut metadata = serde_json::json!({
-        "name": parent_id.name(),
-        "resourceVersion": parent_resource_version,
-    });
-    if let Some(ns) = parent_id.namespace() {
-        let obj = metadata.as_object_mut().unwrap();
-        obj.insert("namespace".to_owned(), Value::String(ns.to_owned()));
-    }
-    let new_status = serde_json::json!({
-        "apiVersion": runtime_config.parent_type.format_api_version(),
-        "kind": runtime_config.parent_type.kind.clone(),
-        "metadata": metadata,
-        "status": new_status,
-    });
-    if should_update {
-        client.update_status(&*runtime_config.parent_type, parent_id, &new_status).await?;
     }
     Ok(())
 }
@@ -189,7 +106,8 @@ async fn update_children(client: &Client, runtime_config: &RuntimeConfig, req: &
             UpdateError::UnknownChildType(child_type.clone())
         })?;
         add_parent_references(runtime_config, parent_id.name(), parent_uid, &mut child)?;
-        let update_required = is_child_update_required(child_config, req, &child_type, &child_id, &child)?;
+        let existing_child = find_existing_child(req, &child_type, &child_id);
+        let update_required = is_child_update_required(&parent_id, child_config, existing_child, &child_type, &child_id, &child)?;
         if let Some(update_type) = update_required {
             let start_time = Instant::now();
             log::debug!("Starting child update for parent_uid: {}, child_type: {}, child_id: {}",
@@ -204,34 +122,24 @@ async fn update_children(client: &Client, runtime_config: &RuntimeConfig, req: &
     Ok(child_ids)
 }
 
-
-
 async fn do_child_update(update_type: UpdateType, child_config: &ChildRuntimeConfig, client: &Client, mut desired_child: Value) -> Result<(), client::Error> {
     let k8s_type = &child_config.child_type;
-    match child_config.update_strategy {
-        UpdateStrategy::OnDelete => {
+    match update_type {
+        UpdateType::Create => {
             client.create_resource(k8s_type, &desired_child).await
         }
-        UpdateStrategy::Recreate => {
-            let child_id = object_id(&desired_child).unwrap();
-            client.delete_resource(k8s_type, &child_id).await?;
-            client.create_resource(k8s_type, &desired_child).await
-        }
-        UpdateStrategy::Replace => {
-            match update_type {
-                UpdateType::Create => {
-                    client.create_resource(k8s_type, &desired_child).await
-                }
-                UpdateType::Replace(resource_version) => {
-                    { // if we're replacing the resource, then we need to specify the old resourceVersion
-                        let obj = desired_child.pointer_mut("/metadata").and_then(Value::as_object_mut).unwrap();
-                        obj.insert("resourceVersion".to_owned(), Value::String(resource_version));
-                    }
-                    let child_id = object_id(&desired_child).unwrap();
-                    client.replace_resource(k8s_type, &child_id, &desired_child).await
-                }
+        UpdateType::Replace(resource_version) => {
+            { // if we're replacing the resource, then we need to specify the old resourceVersion
+                let obj = desired_child.pointer_mut("/metadata").and_then(Value::as_object_mut).unwrap();
+                obj.insert("resourceVersion".to_owned(), Value::String(resource_version));
             }
-
+            let child_id = object_id(&desired_child).unwrap();
+            client.replace_resource(k8s_type, &child_id, &desired_child).await
+        }
+        UpdateType::Delete => {
+            let child_id = object_id(&desired_child).unwrap();
+            // TODO: Deleting a resource could return a 409 error if it's already being deleted. Figure out how to deal with that
+            client.delete_resource(k8s_type, &child_id).await
         }
     }
 }
@@ -240,27 +148,28 @@ async fn do_child_update(update_type: UpdateType, child_config: &ChildRuntimeCon
 enum UpdateType {
     Create,
     Replace(String),
+    Delete,
 }
 
-fn is_child_update_required(child_config: &ChildRuntimeConfig, req: &SyncRequest, child_type: &K8sTypeRef<'_>, child_id: &ObjectIdRef<'_>, child: &Value) -> Result<Option<UpdateType>, UpdateError> {
+fn find_existing_child<'a, 'b>(req: &'a SyncRequest, child_type: &'b K8sTypeRef<'_>, child_id: &'b ObjectIdRef<'_>) -> Option<&'a K8sResource> {
     let (api_version, kind) = child_type.as_parts();
     let (namespace, name) = child_id.as_parts();
-    let parent_id = req.parent.get_object_id();
+    req.find_child(api_version, kind, namespace, name)
+}
 
-    let update_type = match (req.find_child(api_version, kind, namespace, name), child_config.update_strategy) {
+fn is_child_update_required(parent_id: &ObjectIdRef<'_>, child_config: &ChildRuntimeConfig, existing_child: Option<&K8sResource>, child_type: &K8sTypeRef<'_>, child_id: &ObjectIdRef<'_>, child: &Value) -> Result<Option<UpdateType>, UpdateError> {
+    let update_type = match (existing_child, child_config.update_strategy) {
         (Some(_), UpdateStrategy::OnDelete) => {
             log::debug!("UpdateStrategy for child type {} is OnDelete and child {} already exists, so will not update",
                     child_type, child_id);
-
             None
         }
-        (Some(existing_child), _) => {
+        (Some(existing_child), update_strategy) => {
             let diffs = compare_values(existing_child.as_ref(), child);
             if diffs.non_empty() {
                 log::info!("Found {} diffs in child of parent: {} with type: {} and id: {}, diffs: {}",
                         diffs.len(), parent_id, child_type, child_id, diffs);
-                let resource_version = existing_child.get_resource_version();
-                Some(UpdateType::Replace(resource_version.to_owned()))
+                determine_update_type(existing_child, update_strategy)
             } else {
                 log::debug!("No difference in child of parent: {}, with type: {} and id: {}", parent_id, child_type, child_id);
                 None
@@ -272,6 +181,25 @@ fn is_child_update_required(child_config: &ChildRuntimeConfig, req: &SyncRequest
         }
     };
     Ok(update_type)
+}
+
+/// figures out what to do when the desired child is different from the existing one. The answer
+/// may be to do nothing for now, if the existing child is in the process of being deleted
+fn determine_update_type(existing_child: &K8sResource, update_strategy: UpdateStrategy) -> Option<UpdateType> {
+    if existing_child.is_deletion_timestamp_set() {
+        log::debug!("Will skip updating child: {} : {} on this loop because it is currently being deleted",
+                existing_child.get_type_ref(), existing_child.get_object_id());
+        None
+    } else if update_strategy == UpdateStrategy::Recreate {
+        // the existing child is not yet being deleted, but we'll need to delete it before we can re-create it.
+        // When updateStrategy is recreate, we only delete it on the first go around and then we'll do a Create
+        // once the delete has finished. This allows us to continue to make progress on the rest of the sync operations
+        // since deletion can sometimes take quite a while due to finalizers needing to run.
+        Some(UpdateType::Delete)
+    } else {
+        let resource_version = existing_child.get_resource_version();
+        Some(UpdateType::Replace(resource_version.to_owned()))
+    }
 }
 
 fn add_parent_references(runtime_config: &RuntimeConfig, parent_name: &str, parent_uid: &str, child: &mut Value) -> Result<(), InvalidResourceError> {

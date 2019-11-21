@@ -1,12 +1,11 @@
 mod informer;
-mod update;
-mod compare;
+mod reconcile;
 mod client;
 
 use crate::resource::{K8sResource, ObjectId, K8sTypeRef};
 use crate::config::{OperatorConfig, ClientConfig, K8sType, UpdateStrategy};
 use crate::runner::informer::{ResourceMessage, ResourceMonitor, EventType, LabelToIdIndex, UidToIdIndex};
-use crate::runner::update::RequestHandler;
+use crate::runner::reconcile::SyncHandler;
 use client::Client;
 use crate::handler::{SyncRequest, Handler};
 
@@ -76,14 +75,13 @@ async fn run_with_client(config: OperatorConfig, client: Client, handler: Arc<dy
     }
     let runtime_config = Arc::new(RuntimeConfig {
         child_types: child_runtime_config,
-        parent_type: parent_type.clone(),
+        parent_type: parent_type,
         correlation_label_name: tracking_label_name,
         controller_label_name: ownership_label_name,
         operator_name,
     });
 
     let mut state = OperatorState {
-        parent_type,
         parents: parent_monitor,
         children,
         sender: tx,
@@ -114,7 +112,6 @@ impl InProgressUpdate {
 }
 
 struct OperatorState {
-    parent_type: Arc<K8sType>,
     parents: ResourceMonitor<UidToIdIndex>,
     children: HashMap<Arc<K8sType>, ResourceMonitor<LabelToIdIndex>>,
     sender: Sender<ResourceMessage>,
@@ -129,12 +126,11 @@ impl OperatorState {
 
     async fn run(&mut self, handler: HandlerRef) {
         let mut parent_ids_to_sync: HashSet<String> = HashSet::with_capacity(16);
-        let mut deleted_parent_ids: HashSet<String> = HashSet::with_capacity(16);
         let mut synced_parents: HashSet<String> = HashSet::with_capacity(16);
 
         loop {
             log::debug!("Starting sync loop with {} existing parents needing to sync", parent_ids_to_sync.len());
-            self.get_parent_uids_to_update(&mut parent_ids_to_sync, &mut deleted_parent_ids).await;
+            self.get_parent_uids_to_update(&mut parent_ids_to_sync).await;
             for parent_uid in parent_ids_to_sync.iter() {
                 if !self.is_update_in_progress(parent_uid) {
                     let result = self.sync_parent(parent_uid.as_str(), handler.clone()).await;
@@ -146,9 +142,7 @@ impl OperatorState {
                 }
             }
 
-            // TODO: invoke finalize for deleted parents
             for id in synced_parents.drain() {
-                deleted_parent_ids.remove(&id);
                 parent_ids_to_sync.remove(&id);
             }
         }
@@ -163,7 +157,7 @@ impl OperatorState {
             Some(p) => p,
             None => {
                 log::warn!("Cannot sync parent with uid: '{}' because resource has been subsequently deleted", parent_uid);
-                return self.ensure_children_deleted(parent_uid).await
+                return Ok(());
             }
         };
         let children = self.get_all_children(parent_uid).await?;
@@ -173,7 +167,7 @@ impl OperatorState {
         self.in_progress_updates.insert(parent_uid.to_owned(), InProgressUpdate::new(parent_id));
 
         let request = SyncRequest { parent: parent, children };
-        let handler = RequestHandler {
+        let handler = SyncHandler {
             sender: self.sender.clone(),
             request,
             handler: handler.clone(),
@@ -181,14 +175,7 @@ impl OperatorState {
             runtime_config: self.runtime_config.clone(),
             parent_index_key: parent_uid.to_owned(),
         };
-        handler.handle_update();
-
-        Ok(())
-    }
-
-    async fn ensure_children_deleted(&mut self, parent_uid: &str) -> Result<(), Error> {
-        let _kids = self.get_all_children(parent_uid).await?;
-        unimplemented!();
+        handler.start_sync();
         Ok(())
     }
 
@@ -213,9 +200,8 @@ impl OperatorState {
 
     /// Tries to receive a whole batch of messages, so that we can consolidate them by parent id
     /// TODO: make the timeouts for these batches configurable
-    async fn get_parent_uids_to_update(&mut self, to_sync: &mut HashSet<String>, to_finalize: &mut HashSet<String>) {
+    async fn get_parent_uids_to_update(&mut self, to_sync: &mut HashSet<String>) {
         let starting_to_sync_len = to_sync.len();
-        let starting_to_finalize_len = to_finalize.len();
         let start_time = Instant::now();
         let mut first_receive_time = start_time;
         // the initial timeout will be pretty long, but as soon as we receive the first message
@@ -229,7 +215,7 @@ impl OperatorState {
             }
             total_messages += 1;
             log::trace!("Received: {:?}", message);
-            self.handle_received_message(message, to_sync, to_finalize);
+            self.handle_received_message(message, to_sync);
 
             // if we've been going for over a second, then we'll use a super short timeout so that
             // we can start syncing as soon as possible
@@ -238,13 +224,13 @@ impl OperatorState {
         }
         let elapsed_millis = duration_to_millis(start_time.elapsed());
         let new_to_sync = to_sync.len() - starting_to_sync_len;
-        let new_to_finalize = to_finalize.len() - starting_to_finalize_len;
-        log::debug!("Received: {} messages to sync {} and finalize {} new parents in {}ms",
-                total_messages, new_to_sync, new_to_finalize, elapsed_millis);
+        log::debug!("Received: {} messages to sync {} new parents in {}ms",
+                total_messages, new_to_sync, elapsed_millis);
     }
 
-    fn handle_received_message(&mut self, message: ResourceMessage, to_sync: &mut HashSet<String>, to_finalize: &mut HashSet<String>) {
+    fn handle_received_message(&mut self, message: ResourceMessage, to_sync: &mut HashSet<String>) {
         if message.index_key.is_none() {
+            // TODO: change resourceMessage so that index_key is not an Option
             log::error!("Received a message with no index_key: {:?}", message);
             return;
         }

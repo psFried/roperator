@@ -120,6 +120,10 @@ impl K8sResource {
         self.0.pointer("/metadata/generation").and_then(Value::as_i64).unwrap_or(-1)
     }
 
+    pub fn is_deletion_timestamp_set(&self) -> bool {
+        self.0.pointer("/metadata/deletionTimestamp").is_some()
+    }
+
     fn validate(value: &Value) -> Result<(), &'static str> {
         value.pointer("/metadata/resourceVersion").ok_or("missing metadata.resourceVersion")?;
         value.pointer("/metadata/name").ok_or("missing metadata.name")?;

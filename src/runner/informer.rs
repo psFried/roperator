@@ -25,6 +25,10 @@ impl ResourceCache {
         self.0.insert(id.into_owned(), res)
     }
 
+    pub fn remove(&mut self, id: &ObjectId) {
+        self.0.remove(id);
+    }
+
     pub fn get_copy(&self, id: &ObjectIdRef) -> Option<K8sResource> {
         self.0.get(id).cloned()
     }
@@ -156,6 +160,14 @@ impl <I: ReverseIndex> CacheAndIndex<I> {
         self.cache.insert(resource);
     }
 
+    fn remove(&mut self, id: &ObjectId, resource: &K8sResource) {
+        let key = self.index.get_key(resource);
+        if let Some(k) = key {
+            self.index.remove_one(k, &id);
+        }
+        self.cache.remove(&id);
+    }
+
     fn clear_all(&mut self) {
         self.index.clear();
         self.cache.clear();
@@ -190,6 +202,7 @@ impl CacheAndIndex<LabelToIdIndex> {
 pub enum EventType {
     Created,
     Updated,
+    Finalizing,
     Deleted,
     UpdateOperationComplete,
 }
@@ -436,7 +449,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         let (event_type, object) = match event {
             WatchEvent::Added(res) => (EventType::Created, res),
             WatchEvent::Deleted(res) => (EventType::Deleted, res),
-            WatchEvent::Modified(res) => (EventType::Updated, res),
+            WatchEvent::Modified(res) => (get_update_event_type(&res), res),
             WatchEvent::Error(err) => {
                 log::warn!("Got apiError for watch on : {:?}, err: {:?}", self.k8s_type, err);
                 return Err(err.into());
@@ -449,7 +462,15 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         let resource_type = self.k8s_type.clone();
         let mut cache_and_index = self.cache_and_index.lock().await;
         let index_key = cache_and_index.index.get_key(&resource).map(String::from);
-        cache_and_index.add(resource);
+
+        match event_type {
+            EventType::Deleted => {
+                cache_and_index.remove(&resource_id, &resource);
+            }
+            _ => {
+                cache_and_index.add(resource);
+            }
+        }
 
         let to_send = ResourceMessage { event_type, resource_type, resource_id, index_key };
         self.sender.send(to_send).await?;
@@ -478,7 +499,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
             self.add_metadata_to_list_object(&mut object)?;
             let resource = K8sResource::from_value(object)?;
             let index_key = cache_and_index.index.get_key(&resource).map(String::from);
-            let event_type = EventType::Updated;
+            let event_type = get_update_event_type(resource.as_ref());
             let resource_type = self.k8s_type.clone();
             let resource_id = resource.get_object_id().into_owned();
             let message = ResourceMessage { event_type, resource_type, resource_id, index_key };
@@ -508,3 +529,14 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
     }
 }
 
+fn get_update_event_type(resource: &Value) -> EventType {
+    if is_finalizing(resource) {
+        EventType::Finalizing
+    } else {
+        EventType::Updated
+    }
+}
+
+fn is_finalizing(resource: &Value) -> bool {
+    resource.pointer("/metadata/deletionTimestamp").is_some()
+}

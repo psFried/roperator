@@ -19,6 +19,7 @@ use lazy_static::lazy_static;
 use std::time::Instant;
 use std::sync::Arc;
 
+pub use self::request::{Patch, MergeStrategy};
 
 lazy_static!{
     static ref NEWLINE_REGEX: Regex = Regex::new("([\\r\\n]+)").unwrap();
@@ -39,11 +40,16 @@ impl Error {
     }
 
     pub fn is_http_410(&self) -> bool {
+        self.is_http_status(410)
+    }
+
+    pub fn is_http_status(&self, code: u16) -> bool {
         match self {
-            &Error::Http(ref status) => status.as_u16() == 410,
-            _ => false
+            &Error::Http(ref status) => status.as_u16() == code,
+            _ => false,
         }
     }
+
 }
 
 impl std::fmt::Display for Error {
@@ -125,7 +131,19 @@ impl Client {
     pub async fn delete_resource(&self, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<(), Error> {
         log::info!("Deleting resouce '{}' with type: {}", id, k8s_type);
         let req = request::delete_request(&self.0.config, k8s_type, id)?;
-        self.execute_ensure_success(req).await
+        let response = self.get_response(req).await?;
+
+        match response.status().as_u16() {
+            200..=299 | 404 | 409 => {
+                // 404 means that something else must have already deleted the resource, which is fine by us
+                // 409 status is returned when the object is already in the process of being deleted, again fine by us
+                Ok(())
+            }
+            other => {
+                log::error!("Delete request for {} : {} failed with status: {}", k8s_type, id, other);
+                Err(Error::http(response.status().clone()))
+            }
+        }
     }
 
     pub async fn create_resource(&self, k8s_type: &K8sType, resource: &Value) -> Result<(), Error> {
@@ -135,6 +153,11 @@ impl Client {
 
     pub async fn replace_resource(&self, k8s_type: &K8sType, id: &ObjectIdRef<'_>, resource: &Value) -> Result<(), Error> {
         let req = request::replace_request(&self.0.config, k8s_type, id, resource)?;
+        self.execute_ensure_success(req).await
+    }
+
+    pub async fn patch_resource(&self, k8s_type: &K8sType, id: &ObjectIdRef<'_>, patch: &Patch) -> Result<(), Error> {
+        let req = request::patch_request(&self.0.config, k8s_type, id, patch)?;
         self.execute_ensure_success(req).await
     }
 
