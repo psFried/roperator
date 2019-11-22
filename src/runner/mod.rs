@@ -12,19 +12,77 @@ use crate::handler::{SyncRequest, Handler};
 use failure::Error;
 use tokio::sync::mpsc::{Sender, Receiver};
 use tokio::prelude::*;
+use tokio::runtime::Runtime;
 
 use std::time::{Instant, Duration};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::{HashMap, HashSet};
 
+pub struct OperatorHandle {
+    running: Arc<AtomicBool>,
+    runtime: Option<Runtime>,
+}
+
+impl OperatorHandle {
+    pub fn shutdown_now(self) {
+        self.running.store(false, Ordering::Relaxed);
+        if let Some(rt) = self.runtime {
+            rt.shutdown_now();
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
+    }
+}
+
+/// Starts the operator and blocks the current thread indefinitely until the operator shuts down due to an error.
+pub fn run_operator(config: OperatorConfig, client_config: ClientConfig, handler: Arc<dyn Handler>) -> Error {
+    let client = match Client::new(client_config) {
+        Ok(c) => c,
+        Err(err) => return err.into(),
+    };
+    let runtime = match Runtime::new() {
+        Ok(rt) => rt,
+        Err(err) => return err.into(),
+    };
+    let running = Arc::new(AtomicBool::new(true));
+    runtime.block_on(async move {
+        run_with_client(running, config, client, handler).await;
+    });
+    log::warn!("Operator stopped, shutting down runtime");
+    runtime.shutdown_on_idle();
+    // return an error here, since the operator will never exit under normal circumstances
+    failure::format_err!("Operator shutdown unexpectedly")
+}
+
+
+/// Starts the operator asynchronously using the provided runtime. This function will return immediately with a
+/// handle that can be used to shutdown the operator at a later point. Will return an error if it fails to create
+/// the http client due to invalid configuration.
+pub fn start_operator_with_runtime(runtime: &Runtime, config: OperatorConfig, client_config: ClientConfig, handler: Arc<dyn Handler>) -> Result<OperatorHandle, Error> {
+    let client = Client::new(client_config)?;
+    let running = Arc::new(AtomicBool::new(true));
+    let handle = OperatorHandle {
+        running: running.clone(),
+        runtime: None
+    };
+    runtime.spawn(async move {
+        run_with_client(running.clone(), config, client, handler).await;
+    });
+    Ok(handle)
+}
+
+
 #[derive(Debug, Clone, PartialEq)]
-pub struct ChildRuntimeConfig {
+pub(crate) struct ChildRuntimeConfig {
     update_strategy: UpdateStrategy,
     child_type: Arc<K8sType>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct RuntimeConfig {
+pub(crate) struct RuntimeConfig {
     pub child_types: HashMap<K8sTypeRef<'static>, ChildRuntimeConfig>,
     pub parent_type: Arc<K8sType>,
     pub correlation_label_name: String,
@@ -33,23 +91,12 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-
-    fn type_for<'a, 'b>(&'a self, type_ref: &'b K8sTypeRef<'a>) -> Option<&'a K8sType> {
+    pub(crate) fn type_for<'a, 'b>(&'a self, type_ref: &'b K8sTypeRef<'a>) -> Option<&'a K8sType> {
         self.child_types.get(type_ref).map(|c| &*c.child_type)
     }
-
 }
 
-pub fn run_operator(config: OperatorConfig, client_config: ClientConfig, handler: Arc<dyn Handler>) -> Result<(), Error> {
-    let runtime = tokio::runtime::Runtime::new()?;
-
-    runtime.block_on(async move {
-        let client = Client::new(client_config)?;
-        run_with_client(config, client, handler).await
-    })
-}
-
-async fn run_with_client(config: OperatorConfig, client: Client, handler: Arc<dyn Handler>) -> Result<(), Error> {
+async fn run_with_client(running: Arc<AtomicBool>, config: OperatorConfig, client: Client, handler: Arc<dyn Handler>) {
     let OperatorConfig {parent, child_types, namespace, operator_name, tracking_label_name, ownership_label_name} = config;
 
     let parent_type = Arc::new(parent);
@@ -82,6 +129,7 @@ async fn run_with_client(config: OperatorConfig, client: Client, handler: Arc<dy
     });
 
     let mut state = OperatorState {
+        running,
         parents: parent_monitor,
         children,
         sender: tx,
@@ -92,7 +140,6 @@ async fn run_with_client(config: OperatorConfig, client: Client, handler: Arc<dy
     };
 
     state.run(handler).await;
-    Ok(())
 }
 
 type HandlerRef = Arc<dyn Handler>;
@@ -112,6 +159,7 @@ impl InProgressUpdate {
 }
 
 struct OperatorState {
+    running: Arc<AtomicBool>,
     parents: ResourceMonitor<UidToIdIndex>,
     children: HashMap<Arc<K8sType>, ResourceMonitor<LabelToIdIndex>>,
     sender: Sender<ResourceMessage>,
@@ -128,9 +176,14 @@ impl OperatorState {
         let mut parent_ids_to_sync: HashSet<String> = HashSet::with_capacity(16);
         let mut synced_parents: HashSet<String> = HashSet::with_capacity(16);
 
-        loop {
+        while self.running.load(Ordering::Relaxed) {
             log::debug!("Starting sync loop with {} existing parents needing to sync", parent_ids_to_sync.len());
             self.get_parent_uids_to_update(&mut parent_ids_to_sync).await;
+            if !self.running.load(Ordering::Relaxed) {
+                // getting the uids to update can take quite a while, so we'll do an extra check to see
+                // if the operator has been shutdown in the meantime
+                break;
+            }
             for parent_uid in parent_ids_to_sync.iter() {
                 if !self.is_update_in_progress(parent_uid) {
                     let result = self.sync_parent(parent_uid.as_str(), handler.clone()).await;
@@ -142,10 +195,12 @@ impl OperatorState {
                 }
             }
 
+            // TODO: replace this second hashset with a call to `parent_ids_to_sync.retain`
             for id in synced_parents.drain() {
                 parent_ids_to_sync.remove(&id);
             }
         }
+        log::info!("Shutting down operator");
     }
 
     fn is_update_in_progress(&self, parent_uid: &str) -> bool {
@@ -206,7 +261,7 @@ impl OperatorState {
         let mut first_receive_time = start_time;
         // the initial timeout will be pretty long, but as soon as we receive the first message
         // we'll start to use a much shorter timeout for receiving subsequent messages
-        let mut timeout = Duration::from_secs(60);
+        let mut timeout = Duration::from_secs(30);
         let mut total_messages: usize = 0;
 
         while let Some(message) = self.recv_next(timeout).await {
@@ -260,7 +315,12 @@ impl OperatorState {
         // TODO: handle actual receive errors that are not from timeouts
         match self.receiver.recv().timeout(timeout).await {
             Err(_) => None,
-            Ok(val) => val,
+            Ok(Some(val)) => Some(val),
+            Ok(None) => {
+                log::warn!("All informers have stopped, stopping operator");
+                self.running.store(false, Ordering::Relaxed);
+                None
+            }
         }
     }
 

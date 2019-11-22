@@ -1,7 +1,6 @@
 #[macro_use] extern crate serde_derive;
 
-mod runner;
-
+pub mod runner;
 pub mod resource;
 pub mod config;
 pub mod handler;
@@ -9,12 +8,11 @@ pub mod handler;
 pub use serde_json;
 pub use serde;
 
-pub use crate::runner::run_operator;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
+pub mod prelude {
+    pub use crate::runner::run_operator;
+    pub use crate::handler::{SyncRequest, SyncResponse, FinalizeResponse, Handler};
+    pub use crate::config::{K8sType, OperatorConfig, ClientConfig, UpdateStrategy, ChildConfig};
+    pub use serde::{Serialize, Deserialize};
 }
+

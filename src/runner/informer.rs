@@ -10,6 +10,7 @@ use failure::Error;
 use std::sync::{Arc};
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::fmt::{self, Debug};
 
 
 #[derive(Debug)]
@@ -207,12 +208,19 @@ pub enum EventType {
     UpdateOperationComplete,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ResourceMessage {
     pub event_type: EventType,
     pub resource_type: Arc<K8sType>,
     pub resource_id: ObjectId,
     pub index_key: Option<String>,
+}
+
+impl Debug for ResourceMessage {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}({:?}, {}, {}, {:?})", std::any::type_name::<ResourceMessage>(),
+                self.event_type, self.resource_type, self.resource_id, self.index_key)
+    }
 }
 
 

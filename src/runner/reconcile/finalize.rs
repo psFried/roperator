@@ -11,7 +11,7 @@ use std::time::{Instant, Duration};
 use std::sync::Arc;
 
 
-pub fn get_index_of_parent_finalizer(req: &SyncRequest, runtime_config: &RuntimeConfig) -> Option<usize> {
+fn get_index_of_parent_finalizer(req: &SyncRequest, runtime_config: &RuntimeConfig) -> Option<usize> {
     let finalizer_name = runtime_config.operator_name.as_str();
     req.parent.as_ref().pointer("/metadata/finalizers")
             .and_then(Value::as_array)
@@ -20,7 +20,7 @@ pub fn get_index_of_parent_finalizer(req: &SyncRequest, runtime_config: &Runtime
             })
 }
 
-pub async fn handle_finalize(handler: SyncHandler) {
+pub(crate) async fn handle_finalize(handler: SyncHandler) {
     let SyncHandler { mut sender, request, handler, client, runtime_config, parent_index_key, } = handler;
 
     let parent_id = request.parent.get_object_id().into_owned();
@@ -92,7 +92,7 @@ async fn remove_finalizer<'a>(client: &Client, runtime_config: &RuntimeConfig, p
 }
 
 
-pub async fn delete_children(client: &Client, runtime_config: &RuntimeConfig, children: impl Iterator<Item=&K8sResource>) -> Result<(), UpdateError> {
+pub(crate) async fn delete_children(client: &Client, runtime_config: &RuntimeConfig, children: impl Iterator<Item=&K8sResource>) -> Result<(), UpdateError> {
     for child in children {
         let child_type = child.get_type_ref();
         let child_id = child.get_object_id();

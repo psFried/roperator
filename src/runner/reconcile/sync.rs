@@ -1,6 +1,6 @@
 use crate::handler::{SyncRequest, SyncResponse};
 use crate::runner::client::{self, Client};
-use crate::config::{UpdateStrategy, K8sType};
+use crate::config::UpdateStrategy;
 use crate::resource::{K8sResource, ObjectId, InvalidResourceError, JsonObject, object_id, type_ref, K8sTypeRef, ObjectIdRef};
 use crate::runner::informer::{ResourceMessage, EventType};
 use crate::runner::{duration_to_millis, RuntimeConfig, ChildRuntimeConfig};
@@ -17,7 +17,7 @@ use std::collections::HashSet;
 
 
 
-pub async fn handle_sync(handler: SyncHandler) {
+pub(crate) async fn handle_sync(handler: SyncHandler) {
         let SyncHandler { mut sender, request, handler, client, runtime_config, parent_index_key } = handler;
         let parent_id = request.parent.get_object_id().into_owned();
 

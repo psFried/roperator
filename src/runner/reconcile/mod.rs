@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::fmt::{self, Display};
 
 
-pub struct SyncHandler {
+pub(crate) struct SyncHandler {
     pub sender: Sender<ResourceMessage>,
     pub request: SyncRequest,
     pub handler: Arc<dyn Handler>,
@@ -71,7 +71,7 @@ impl From<InvalidResourceError> for UpdateError {
     }
 }
 
-pub async fn update_status_if_different(parent_id: &ObjectIdRef<'_>, parent_resource_version: &str, client: &Client, runtime_config: &RuntimeConfig, current_gen: i64, old_status: Option<&Value>, mut new_status: Value) -> Result<(), UpdateError> {
+pub(crate) async fn update_status_if_different(parent_id: &ObjectIdRef<'_>, parent_resource_version: &str, client: &Client, runtime_config: &RuntimeConfig, current_gen: i64, old_status: Option<&Value>, mut new_status: Value) -> Result<(), UpdateError> {
     if let Some(s) = new_status.as_object_mut() {
         s.insert("observedGeneration".to_owned(), current_gen.into());
     }
