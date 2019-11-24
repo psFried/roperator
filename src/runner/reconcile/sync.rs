@@ -154,7 +154,7 @@ enum UpdateType {
 fn find_existing_child<'a, 'b>(req: &'a SyncRequest, child_type: &'b K8sTypeRef<'_>, child_id: &'b ObjectIdRef<'_>) -> Option<&'a K8sResource> {
     let (api_version, kind) = child_type.as_parts();
     let (namespace, name) = child_id.as_parts();
-    req.find_child(api_version, kind, namespace, name)
+    req.raw_child(api_version, kind, namespace, name)
 }
 
 fn is_child_update_required(parent_id: &ObjectIdRef<'_>, child_config: &ChildRuntimeConfig, existing_child: Option<&K8sResource>, child_type: &K8sTypeRef<'_>, child_id: &ObjectIdRef<'_>, child: &Value) -> Result<Option<UpdateType>, UpdateError> {

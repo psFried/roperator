@@ -38,7 +38,8 @@ impl OperatorHandle {
 }
 
 /// Starts the operator and blocks the current thread indefinitely until the operator shuts down due to an error.
-pub fn run_operator(config: OperatorConfig, client_config: ClientConfig, handler: Arc<dyn Handler>) -> Error {
+pub fn run_operator(config: OperatorConfig, client_config: ClientConfig, handler: impl Handler) -> Error {
+    let handler = Arc::new(handler);
     let client = match Client::new(client_config) {
         Ok(c) => c,
         Err(err) => return err.into(),
@@ -61,7 +62,8 @@ pub fn run_operator(config: OperatorConfig, client_config: ClientConfig, handler
 /// Starts the operator asynchronously using the provided runtime. This function will return immediately with a
 /// handle that can be used to shutdown the operator at a later point. Will return an error if it fails to create
 /// the http client due to invalid configuration.
-pub fn start_operator_with_runtime(runtime: &Runtime, config: OperatorConfig, client_config: ClientConfig, handler: Arc<dyn Handler>) -> Result<OperatorHandle, Error> {
+pub fn start_operator_with_runtime(runtime: &Runtime, config: OperatorConfig, client_config: ClientConfig, handler: impl Handler) -> Result<OperatorHandle, Error> {
+    let handler = Arc::new(handler);
     let client = Client::new(client_config)?;
     let running = Arc::new(AtomicBool::new(true));
     let handle = OperatorHandle {

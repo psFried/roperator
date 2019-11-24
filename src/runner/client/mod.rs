@@ -13,7 +13,6 @@ use openssl::x509::X509;
 use openssl::pkey::PKey;
 use futures_util::TryStreamExt;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
 use serde_json::Value;
 use regex::bytes::Regex;
 use lazy_static::lazy_static;

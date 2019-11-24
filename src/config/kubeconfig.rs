@@ -1,6 +1,5 @@
 use super::{ClientConfig, CAData, Credentials};
 
-use serde::Deserialize;
 use dirs::home_dir;
 
 use std::path::PathBuf;

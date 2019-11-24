@@ -144,6 +144,14 @@ impl std::convert::AsRef<Value> for K8sResource {
     }
 }
 
+impl std::ops::Deref for K8sResource {
+    type Target = Value;
+
+    fn deref(&self) -> &Value {
+        &self.0
+    }
+}
+
 impl std::borrow::Borrow<Value> for K8sResource {
     fn borrow(&self) -> &Value {
         &self.0
