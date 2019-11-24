@@ -1,4 +1,4 @@
-use crate::config::{K8sType, ClientConfig};
+use crate::config::{K8sType, ClientConfig, Credentials};
 use crate::runner::client::Error;
 use crate::resource::{ObjectIdRef, K8sResource};
 
@@ -86,8 +86,7 @@ pub fn update_status_request(client_config: &ClientConfig, k8s_type: &K8sType, i
         path.push("status");
     }
     let as_vec = serde_json::to_vec(new_status)?;
-    let req = Request::put(url.into_string())
-            .header(header::AUTHORIZATION, client_config.service_account_token.as_str())
+    let req = make_req(url, Method::PUT, client_config)
             .body(Body::from(as_vec))
             .unwrap();
     Ok(req)
@@ -95,8 +94,7 @@ pub fn update_status_request(client_config: &ClientConfig, k8s_type: &K8sType, i
 
 pub fn delete_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
-    let req = Request::delete(url.into_string())
-            .header(header::AUTHORIZATION, client_config.service_account_token.as_str())
+    let req = make_req(url, Method::DELETE, client_config)
             .body(Body::empty())
             .unwrap();
     Ok(req)
@@ -119,8 +117,7 @@ pub fn watch_request(client_config: &ClientConfig, k8s_type: &K8sType, resource_
         }
     }
 
-    let req = Request::get(url.into_string())
-            .header(header::AUTHORIZATION, client_config.service_account_token.as_str())
+    let req = make_req(url, Method::GET, client_config)
             .body(Body::empty())
             .unwrap();
     Ok(req)
@@ -132,8 +129,7 @@ pub fn list_request(client_config: &ClientConfig, k8s_type: &K8sType, label_sele
         let mut query = url.query_pairs_mut();
         query.append_pair("labelSelector", selector);
     }
-    let req = Request::get(url.into_string())
-            .header(header::AUTHORIZATION, client_config.service_account_token.as_str())
+    let req = make_req(url, Method::GET, client_config)
             .body(Body::empty())
             .unwrap();
     Ok(req)
@@ -143,8 +139,15 @@ fn make_req(url: Url, method: http::Method, client_config: &ClientConfig) -> htt
     let mut builder = Request::builder();
     builder.method(method)
             .uri(url.into_string())
-            .header(header::AUTHORIZATION, client_config.service_account_token.as_str())
+            .header(header::ACCEPT, "application/json")
             .header(header::USER_AGENT, client_config.user_agent.as_str());
+
+    match client_config.credentials {
+        Credentials::Header(ref value) => {
+            builder.header(header::AUTHORIZATION, value);
+        }
+        _ => {}
+    }
     builder
 }
 

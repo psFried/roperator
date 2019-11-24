@@ -1,14 +1,16 @@
 mod request;
 
-use crate::config::{ClientConfig, K8sType};
+use crate::config::{ClientConfig, K8sType, CAData, Credentials};
 use crate::resource::ObjectIdRef;
 
-use http::{Request, Response, header};
+use http::{Request, Response};
 use hyper::client::Client as HyperClient;
 use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper_openssl::HttpsConnector;
 use openssl::ssl::{SslConnector, SslMethod};
+use openssl::x509::X509;
+use openssl::pkey::PKey;
 use futures_util::TryStreamExt;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -16,6 +18,7 @@ use serde_json::Value;
 use regex::bytes::Regex;
 use lazy_static::lazy_static;
 
+use std::io;
 use std::time::Instant;
 use std::sync::Arc;
 
@@ -78,7 +81,6 @@ impl From<serde_json::Error> for Error {
 struct ClientInner {
     http_client: HyperClient<HttpsConnector<HttpConnector>>,
     config: ClientConfig,
-    auth_header_value: header::HeaderValue,
 }
 
 #[derive(Debug, Clone)]
@@ -87,28 +89,63 @@ pub struct Client(Arc<ClientInner>);
 
 impl Client {
 
-    pub fn new(config: ClientConfig) -> Result<Client, failure::Error> {
+    pub fn new(mut config: ClientConfig) -> Result<Client, io::Error> {
         let mut http = HttpConnector::new();
         http.enforce_http(false);
 
         let mut ssl = SslConnector::builder(SslMethod::tls())?;
         // enable http2 using alpn
         ssl.set_alpn_protos(b"\x02h2\x08http/1.1")?;
-        if let Some(ca_path) = config.ca_file_path.as_ref() {
-            ssl.set_ca_file(ca_path.as_str())?;
+        match config.ca_data.take() {
+            Some(CAData::Contents(certs)) => {
+                // if the CA cert contents are provided inline, as they are from a kubeconfig file, then we need to manually
+                // parse them and add them to the openssl cert store
+                let decoded = base64::decode(&certs).map_err(|err| {
+                    io::Error::new(io::ErrorKind::Other, format!("Invalid base64 content of certificate-authority-data: {}", err))
+                })?;
+                let certs = X509::stack_from_pem(decoded.as_slice())?;
+                let cert_store = ssl.cert_store_mut();
+                for cert in certs {
+                    cert_store.add_cert(cert)?;
+                }
+            }
+            Some(CAData::File(path)) => {
+                ssl.set_ca_file(path.as_str())?;
+            }
+            None => {}
+        }
+
+        match config.credentials {
+            Credentials::Pem { ref certificate_base64, ref private_key_base64 } => {
+                let decoded_cert = base64::decode(certificate_base64).map_err(|err| {
+                    io::Error::new(io::ErrorKind::Other, format!("Invalid base64 content of client-certificate-data: {}", err))
+                })?;
+                let decoded_key = base64::decode(private_key_base64).map_err(|err| {
+                    io::Error::new(io::ErrorKind::Other, format!("Invalid base64 content of client-key-data: {}", err))
+                })?;
+                let cert = X509::from_pem(decoded_cert.as_slice())?;
+                let pkey = PKey::private_key_from_pem(decoded_key.as_slice())?;
+                ssl.set_certificate(&*cert)?; // &* is to convert from X509 to &X509Ref where X509 impls Deref to X509Ref
+                ssl.set_private_key(&*pkey)?; // same as above
+                ssl.check_private_key()?; // ensures that the provided private key and certificate actually go together
+            }
+            _ => {}
+        }
+
+        if config.verify_ssl_certs {
+            ssl.set_verify(openssl::ssl::SslVerifyMode::PEER);
+        } else {
+            log::warn!("TLS Certificate verifification has been disabled! All connections to the Kubernetes api server will be insecure!");
+            ssl.set_verify(openssl::ssl::SslVerifyMode::NONE);
         }
 
         let https = HttpsConnector::with_connector(http, ssl)?;
 
         let client = HyperClient::builder().build(https);
 
-        let bearer_auth = format!("Bearer {}", config.service_account_token);
-        let auth_header_value = header::HeaderValue::from_str(bearer_auth.as_str())?;
-
         let inner = ClientInner {
             http_client: client,
             config,
-            auth_header_value,
         };
         Ok(Client(Arc::new(inner)))
     }
@@ -214,13 +251,8 @@ impl Client {
         result
     }
 
-    async fn private_execute_request(&self, start_time: Instant, method: &str, uri: &str, mut req: Request<Body>) -> Result<Response<Body>, Error> {
+    async fn private_execute_request(&self, start_time: Instant, method: &str, uri: &str, req: Request<Body>) -> Result<Response<Body>, Error> {
         log::debug!("Starting {} request to: {}", method, uri);
-
-        {
-            let headers = req.headers_mut();
-            headers.insert(header::AUTHORIZATION, self.0.auth_header_value.clone());
-        }
 
         let result = self.0.http_client.request(req).await;
         let duration = start_time.elapsed().as_millis();

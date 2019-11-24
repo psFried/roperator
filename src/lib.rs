@@ -5,6 +5,7 @@ pub mod resource;
 pub mod config;
 pub mod handler;
 
+pub use serde_yaml;
 pub use serde_json;
 pub use serde;
 

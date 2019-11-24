@@ -1,9 +1,11 @@
-use crate::resource::K8sTypeRef;
+mod kubeconfig;
 
-use failure::Error;
+use crate::resource::K8sTypeRef;
 
 use std::fmt::{self, Display};
 use std::collections::HashMap;
+use std::path::Path;
+use std::io;
 
 pub const DEFAULT_TRACKING_LABEL_NAME: &str = "app.kubernetes.io/instance";
 pub const DEFAULT_OWNERSHIP_LABEL_NAME: &str = "app.kubernetes.io/managed-by";
@@ -11,6 +13,9 @@ pub const DEFAULT_OWNERSHIP_LABEL_NAME: &str = "app.kubernetes.io/managed-by";
 const SERVICE_ACCOUNT_TOKEN_PATH: &str = "/var/run/secrets/kubernetes.io/serviceaccount/token";
 const SERVICE_ACCOUNT_CA_PATH: &str = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt";
 const API_SERVER_HOSTNAME: &str = "kubernetes.default.svc";
+
+
+pub use self::kubeconfig::KubeConfigError;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum UpdateStrategy {
@@ -78,15 +83,33 @@ impl OperatorConfig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum CAData {
+    File(String),
+    Contents(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Credentials {
+    Header(String),
+    Pem {
+        certificate_base64: String,
+        private_key_base64: String,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClientConfig {
     pub api_server_endpoint: String,
-    pub service_account_token: String,
-    pub ca_file_path: Option<String>,
+    pub credentials: Credentials,
+    pub ca_data: Option<CAData>,
     pub user_agent: String,
+    pub verify_ssl_certs: bool,
+    pub impersonate: Option<String>,
+    pub impersonate_groups: Vec<String>,
 }
 
 impl ClientConfig {
-    pub fn from_service_account(user_agent: String) -> Result<ClientConfig, Error> {
+    pub fn from_service_account(user_agent: impl Into<String>) -> Result<ClientConfig, io::Error> {
         use std::io::Read;
         use std::fs::File;
 
@@ -94,8 +117,9 @@ impl ClientConfig {
         let mut service_account_token = String::new();
         token_file.read_to_string(&mut service_account_token)?;
 
-        let ca_file_path = if std::path::Path::new(SERVICE_ACCOUNT_CA_PATH).exists() {
-            Some(SERVICE_ACCOUNT_CA_PATH.to_owned())
+        let ca_file_path = Path::new(SERVICE_ACCOUNT_CA_PATH);
+        let ca_data = if ca_file_path.exists() {
+            Some(CAData::File(SERVICE_ACCOUNT_CA_PATH.to_owned()))
         } else {
             None
         };
@@ -103,10 +127,17 @@ impl ClientConfig {
         let api_server_endpoint = format!("https://{}", API_SERVER_HOSTNAME);
         Ok(ClientConfig {
             api_server_endpoint,
-            service_account_token,
-            ca_file_path,
-            user_agent,
+            ca_data,
+            credentials: Credentials::Header(format!("Bearer {}", service_account_token)),
+            user_agent: user_agent.into(),
+            verify_ssl_certs: true,
+            impersonate: None,
+            impersonate_groups: Vec::new(),
         })
+    }
+
+    pub fn from_kubeconfig(user_agent: impl Into<String>) -> Result<ClientConfig, KubeConfigError> {
+        self::kubeconfig::load_from_kubeconfig(user_agent.into())
     }
 }
 
