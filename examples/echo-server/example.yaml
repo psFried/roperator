@@ -1,0 +1,10 @@
+# This is an example instance of the custom resource defined in crd.yaml
+# You need to first create the CRD using `kubectl apply -f crd.yaml` before
+# you can create this resource by using `kubectl apply -f example.yaml`
+apiVersion: example.roperator.com/v1alpha1
+kind: EchoServer
+metadata:
+  namespace: default
+  name: foo
+spec:
+  serviceName: my-test-service
