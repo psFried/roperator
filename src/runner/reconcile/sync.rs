@@ -1,4 +1,4 @@
-use crate::handler::{SyncRequest, SyncResponse};
+use crate::handler::{SyncRequest, SyncResponse, Handler};
 use crate::runner::client::{self, Client};
 use crate::config::UpdateStrategy;
 use crate::resource::{K8sResource, ObjectId, InvalidResourceError, JsonObject, object_id, type_ref, K8sTypeRef, ObjectIdRef};
@@ -18,51 +18,58 @@ use std::collections::HashSet;
 
 
 pub(crate) async fn handle_sync(handler: SyncHandler) {
-        let SyncHandler { mut sender, request, handler, client, runtime_config, parent_index_key } = handler;
-        let parent_id = request.parent.get_object_id().into_owned();
+    let SyncHandler { mut sender, request, handler, client, runtime_config, parent_index_key } = handler;
+    let parent_id = request.parent.get_object_id().into_owned();
 
-        let start_time = Instant::now();
-        let (request, response) = {
-            tokio_executor::blocking::run(move || {
-                let result = handler.sync(&request);
-                log::debug!("finished invoking handler for parent: {} in {}ms", request.parent.get_object_id(), duration_to_millis(start_time.elapsed()));
-                (request, result)
-            }).await
-        };
+    let start_time = Instant::now();
+    let result = private_handle_sync(start_time, request, handler, client, &*runtime_config).await;
 
-        let result = update_all(request, response, client, runtime_config.clone()).await;
-        if let Err(err) = result {
-            log::error!("Error while syncing parent: {}: {:?}", parent_id, err);
-            // we'll delay for a while before sending the message that we've finished so that we can
-            // prevent the main loop from re-trying too soon. Eventually we should implement a backoff
-            delay_for(std::time::Duration::from_secs(10)).await;
-        } else {
-            log::info!("Finished sync for parent: {}", parent_id);
-        }
-        let message = ResourceMessage {
-            event_type: EventType::UpdateOperationComplete,
-            resource_id: parent_id,
-            resource_type: runtime_config.parent_type.clone(),
-            index_key: Some(parent_index_key),
-        };
-        let _ = sender.send(message).await;
+    let retry = if let Err(err) = result {
+        log::error!("Error while syncing parent: {}: {:?}", parent_id, err);
+        // we'll delay for a while before sending the message that we've finished so that we can
+        // prevent the main loop from re-trying too soon. Eventually we should implement a backoff
+        delay_for(std::time::Duration::from_secs(10)).await;
+        true
+    } else {
+        log::info!("Finished sync for parent: {}", parent_id);
+        false
+    };
+    let message = ResourceMessage {
+        event_type: EventType::UpdateOperationComplete { retry },
+        resource_id: parent_id,
+        resource_type: runtime_config.parent_type.clone(),
+        index_key: Some(parent_index_key),
+    };
+    let _ = sender.send(message).await;
+}
+
+async fn private_handle_sync(start_time: Instant, request: SyncRequest, handler: Arc<dyn Handler>, client: Client, runtime_config: &RuntimeConfig) -> Result<(), UpdateError> {
+    let (request, sync_result) = {
+        tokio_executor::blocking::run(move || {
+            let result = handler.sync(&request);
+            log::debug!("finished invoking handler for parent: {} in {}ms", request.parent.get_object_id(), duration_to_millis(start_time.elapsed()));
+            (request, result)
+        }).await
+    };
+    let response = sync_result.map_err(|e| UpdateError::HandlerError(e))?;
+    update_all(request, response, client, runtime_config).await
 }
 
 
-async fn update_all(request: SyncRequest, handler_response: SyncResponse, client: Client, runtime_config: Arc<RuntimeConfig>) -> Result<(), UpdateError> {
+async fn update_all(request: SyncRequest, handler_response: SyncResponse, client: Client, runtime_config: &RuntimeConfig) -> Result<(), UpdateError> {
     let start_time = Instant::now();
     let SyncResponse {status, children} = handler_response;
     let parent_id = request.parent.get_object_id().into_owned();
     let parent_resource_version = request.parent.get_resource_version();
     let current_generation = request.parent.generation();
-    update_status_if_different(&parent_id, parent_resource_version, &client, &*runtime_config, current_generation, request.parent.status(), status).await?;
+    update_status_if_different(&parent_id, parent_resource_version, &client, runtime_config, current_generation, request.parent.status(), status).await?;
     log::debug!("Successfully updated status for parent: {} in {}ms", parent_id, duration_to_millis(start_time.elapsed()));
-    let child_ids = update_children(&client, &*runtime_config, &request, children).await?;
+    let child_ids = update_children(&client, runtime_config, &request, children).await?;
     log::debug!("Successfully updated all {} children of parent: {} in {}ms", child_ids.len(), parent_id,
             duration_to_millis(start_time.elapsed()));
 
     // now that all the child updates have completed successfully, we'll delete any children that are no longer desired
-    delete_undesired_children(&client, &*runtime_config, &child_ids, &request).await?;
+    delete_undesired_children(&client, runtime_config, &child_ids, &request).await?;
     Ok(())
 }
 

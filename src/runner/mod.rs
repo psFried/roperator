@@ -19,17 +19,20 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::{HashMap, HashSet};
 
+/// A handle to a potentially running operator, which allows for shutting it down
 pub struct OperatorHandle {
     running: Arc<AtomicBool>,
-    runtime: Option<Runtime>,
+}
+
+impl std::ops::Drop for OperatorHandle {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+    }
 }
 
 impl OperatorHandle {
     pub fn shutdown_now(self) {
         self.running.store(false, Ordering::Relaxed);
-        if let Some(rt) = self.runtime {
-            rt.shutdown_now();
-        }
     }
 
     pub fn is_active(&self) -> bool {
@@ -37,6 +40,7 @@ impl OperatorHandle {
     }
 }
 
+/// Starts the operator and blocks the current thread indefinitely until the operator shuts down due to an error.
 pub fn run_operator(config: OperatorConfig, handler: impl Handler) -> Error {
     let client_config = {
         let user_agent = config.operator_name.as_str();
@@ -83,7 +87,6 @@ pub fn start_operator_with_runtime(runtime: &Runtime, config: OperatorConfig, cl
     let running = Arc::new(AtomicBool::new(true));
     let handle = OperatorHandle {
         running: running.clone(),
-        runtime: None
     };
     runtime.spawn(async move {
         run_with_client(running.clone(), config, client, handler).await;
@@ -308,19 +311,21 @@ impl OperatorState {
         }
         let ResourceMessage { index_key, event_type, resource_type, resource_id } = message;
         let uid = index_key.unwrap();
-        // TODO: check whether there's an in progress update before adding this to the set
-        // TODO: check the message type and remove in_progress updates from the state if needed
         match event_type {
-            EventType::UpdateOperationComplete => {
+            EventType::UpdateOperationComplete { retry } => {
                 if let Some(prev) = self.in_progress_updates.remove(&uid) {
                     let duration_millis = duration_to_millis(prev.start_time.elapsed());
-                    log::info!("Completed sync of parent: {} with uid: {} in {}ms", prev.parent_id, uid, duration_millis);
+                    log::info!("Completed sync of parent: {} with uid: {} in {}ms, needs retry: {}", prev.parent_id, uid, duration_millis, retry);
                 } else {
                     log::error!("Got updateOperationComplete when there was no in-progress operation for uid: {}", uid);
                 }
+
+                if retry {
+                    to_sync.insert(uid);
+                    log::info!("Triggering re-try of sync on parent: {}", resource_id);
+                }
             }
             _ => {
-                // TODO: If this is a parent type, then look at deletionTimestamp to see if the object needs to be finalized, also remove our finalizer from the list when we finalize it
                 if to_sync.insert(uid) {
                     log::info!("Triggering sync due to event: {:?}, on resource: {} {} ", event_type, resource_type, resource_id);
                 }
@@ -329,7 +334,6 @@ impl OperatorState {
     }
 
     async fn recv_next(&mut self, timeout: Duration) -> Option<ResourceMessage> {
-        // TODO: handle actual receive errors that are not from timeouts
         match self.receiver.recv().timeout(timeout).await {
             Err(_) => None,
             Ok(Some(val)) => Some(val),

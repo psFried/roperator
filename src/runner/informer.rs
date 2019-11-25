@@ -205,7 +205,9 @@ pub enum EventType {
     Updated,
     Finalizing,
     Deleted,
-    UpdateOperationComplete,
+    UpdateOperationComplete {
+        retry: bool
+    },
 }
 
 #[derive(Clone, PartialEq)]

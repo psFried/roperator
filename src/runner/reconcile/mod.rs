@@ -47,6 +47,7 @@ pub enum UpdateError {
     Client(client::Error),
     InvalidHandlerResponse(InvalidResourceError),
     UnknownChildType(K8sTypeRef<'static>),
+    HandlerError(crate::handler::Error),
 }
 
 impl Display for UpdateError {
@@ -55,6 +56,7 @@ impl Display for UpdateError {
             UpdateError::Client(e) => write!(f, "Client Error: {}", e),
             UpdateError::InvalidHandlerResponse(e) => write!(f, "Invalid response from Handler: {}", e),
             UpdateError::UnknownChildType(child_type) => write!(f, "No configuration exists for child with type: {}", child_type),
+            UpdateError::HandlerError(err) => write!(f, "Handler error: {}", err),
         }
     }
 }
@@ -72,6 +74,9 @@ impl From<InvalidResourceError> for UpdateError {
 }
 
 pub(crate) async fn update_status_if_different(parent_id: &ObjectIdRef<'_>, parent_resource_version: &str, client: &Client, runtime_config: &RuntimeConfig, current_gen: i64, old_status: Option<&Value>, mut new_status: Value) -> Result<(), UpdateError> {
+    if new_status.is_null() {
+        return Ok(());
+    }
     if let Some(s) = new_status.as_object_mut() {
         s.insert("observedGeneration".to_owned(), current_gen.into());
     }

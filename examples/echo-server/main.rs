@@ -4,58 +4,47 @@
 use roperator::prelude::{
     run_operator,
     OperatorConfig, ChildConfig,
-    K8sType, K8sResource, HandlerImpl, SyncRequest,
+    K8sType, K8sResource, Error,
+    SyncRequest, SyncResponse,
 };
 use roperator::serde_json::{json, Value};
-use roperator::failure::Error;
 
 /// Name of our operator, which is automatically added as a label value in all of the child resources we create
 const OPERATOR_NAME: &str = "echoserver-example";
 
-/// module describing our EchoServer CRD
-mod echo_server {
-    use roperator::config::K8sType;
+/// Returns a `K8sType` with basic info about our parent CRD
+pub fn parent_type() -> K8sType {
+    K8sType::new("example.roperator.com", "v1alpha1", "EchoServer", "echoservers")
+}
 
-    const VERSION: &str = "v1alpha1";
-    const GROUP: &str = "example.roperator.com";
-    const KIND: &str = "EchoServer";
-    const PLURAL_KIND: &str = "echoservers";
+/// Represents an instance of the CRD that is in the kubernetes cluster.
+/// Note that this struct does not need to implement Serialize because the
+/// operator will only ever update the `status` subresource
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+pub struct EchoServer {
+    pub metadata: Metadata,
+    pub spec: EchoServerSpec,
+    pub status: Option<EchoServerStatus>,
+}
 
-    pub fn k8s_type() -> K8sType {
-        K8sType::new(GROUP, VERSION, KIND, PLURAL_KIND)
-    }
+/// defines only the fields we care about from the metadata. We could also just use the `ObjectMeta` struct from the `k8s_openapi` crate.
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+pub struct Metadata {
+    pub namespace: String,
+    pub name: String,
+}
 
-    /// Represents an instance of the CRD that is in the kubernetes cluster.
-    /// Note that this struct does not need to implement Serialize because the
-    /// operator will only ever update the `status` subresource
-    #[derive(Deserialize, Clone, Debug, PartialEq)]
-    pub struct EchoServer {
-        pub metadata: Metadata,
-        pub spec: EchoServerSpec,
-        pub status: Option<EchoServerStatus>,
-    }
+/// The spec of our CRD
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EchoServerSpec {
+    pub service_name: String,
+}
 
-    /// defines only the fields we care about from the metadata
-    #[derive(Deserialize, Clone, Debug, PartialEq)]
-    pub struct Metadata {
-        pub namespace: String,
-        pub name: String,
-    }
-
-    /// The spec of our CRD
-    #[derive(Deserialize, Clone, Debug, PartialEq)]
-    pub struct EchoServerSpec {
-        #[serde(rename = "serviceName")]
-        pub service_name: String,
-    }
-
-    /// Represents the status of a CRD instance. Unlike the other structs we've defined here,
-    /// this one _does_ need to implement `serde::Serialize` so that we can return it from
-    /// our handler function.
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-    pub struct EchoServerStatus {
-        pub message: String,
-    }
+/// Represents the status of a parent EchoServer instance
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+pub struct EchoServerStatus {
+    pub message: String,
 }
 
 fn main() {
@@ -66,27 +55,29 @@ fn main() {
     // For each child type, we'll also specify the `UpdateStrategy`, which determines the behavior after a change is detected
     // between the desired and actual state of a resource of that type. For example, Pods cannot generally be updated in-place,
     // but must be deleted and re-created.
-    let parent_type = echo_server::k8s_type();
-    let operator_config = OperatorConfig::new(OPERATOR_NAME, parent_type)
+    let operator_config = OperatorConfig::new(OPERATOR_NAME, parent_type())
             .with_child(K8sType::pod(), ChildConfig::recreate())
             .with_child(K8sType::service(), ChildConfig::replace());
 
-    let handler = HandlerImpl::default()
-            .determine_children(|req: &SyncRequest| {
-                // This function should return the desired children based on the given parent in the request
-                get_desired_children(req)
-            })
-            .determine_status(|req: &SyncRequest| {
-                // This function just returns a json object that will be set as the status of the parent resource
-                Ok(json!({
-                    "message": get_current_status_message(req),
-                }))
-            });
-
+    // now we run the operator, passing in our handler function
+    let err = run_operator(operator_config, handle_sync);
     // `run_operator` will never return under normal circumstances, so we only need to handle the sad path here
-    let err = run_operator(operator_config, handler);
     log::error!("Error running operator: {:?}", err);
     std::process::exit(1);
+}
+
+/// This function will invoked by the operator any time there's a change to any parent or child resources.
+/// This just needs to return the desired parent status as well as the desired state for any children.
+fn handle_sync(request: &SyncRequest) -> Result<SyncResponse, Error> {
+    log::info!("Got sync request: {:?}", request);
+    let status = json!({
+        "message": get_current_status_message(request),
+    });
+    let children = get_desired_children(request)?;
+    Ok(SyncResponse {
+        status,
+        children
+    })
 }
 
 /// Returns the json value that should be set on the parent EchoServer
@@ -94,18 +85,22 @@ fn get_current_status_message(request: &SyncRequest) -> String {
     let children = request.children();
     let pods = children.of_type_raw("v1", "Pod");
     let pod: Option<&K8sResource> = pods.first();
-    pod.and_then(|p| p.pointer("/status/message").and_then(Value::as_str).map(String::from))
-            .unwrap_or("Waiting for Pod to be initialized".to_owned())
+    pod.and_then(|p| p.pointer("/status/message").and_then(Value::as_str))
+            .unwrap_or("Waiting for Pod to be initialized")
+            .to_owned()
 }
 
+/// Returns the children that we want for the given parent
 fn get_desired_children(request: &SyncRequest) -> Result<Vec<Value>, Error> {
-    log::info!("Got sync request: {:?}", request);
-    let custom_resource: echo_server::EchoServer = request.deserialize_parent()?;
+    let custom_resource: EchoServer = request.deserialize_parent()?;
     let service_name = custom_resource.spec.service_name.as_str();
 
     let echo_server_name = custom_resource.metadata.name.as_str();
     let echo_server_namespace = custom_resource.metadata.namespace.as_str();
 
+    // For this example, we'll just write JSON directly, but you could also feel free to use the structs
+    // from the `k8s_openapi` crate, which defines types for pretty much all the Kuberentes resource types.
+    // You can also use anything that implements `serde::Serialize`, but writing JSON directly is also fine.
     let pod = json!({
         "apiVersion": "v1",
         "kind": "Pod",
@@ -143,7 +138,7 @@ fn get_desired_children(request: &SyncRequest) -> Result<Vec<Value>, Error> {
         "kind": "Service",
         "metadata": {
             "namespace": echo_server_namespace,
-            "name": service_name,
+            "name": echo_server_name,
         },
         "spec": {
             "type": "ClusterIP",
