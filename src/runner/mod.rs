@@ -37,8 +37,23 @@ impl OperatorHandle {
     }
 }
 
+pub fn run_operator(config: OperatorConfig, handler: impl Handler) -> Error {
+    let client_config = {
+        let user_agent = config.operator_name.as_str();
+        let result = ClientConfig::from_service_account(user_agent).or_else(|_| {
+            log::debug!("Failed to load ClientConfig from service account, so trying to load from kubeconfig");
+            ClientConfig::from_kubeconfig(user_agent)
+        });
+        match result {
+            Ok(conf) => conf,
+            Err(err) => return err.into(),
+        }
+    };
+    run_operator_with_client_config(config, client_config, handler)
+}
+
 /// Starts the operator and blocks the current thread indefinitely until the operator shuts down due to an error.
-pub fn run_operator(config: OperatorConfig, client_config: ClientConfig, handler: impl Handler) -> Error {
+pub fn run_operator_with_client_config(config: OperatorConfig, client_config: ClientConfig, handler: impl Handler) -> Error {
     let handler = Arc::new(handler);
     let client = match Client::new(client_config) {
         Ok(c) => c,

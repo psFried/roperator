@@ -3,13 +3,11 @@
 
 use roperator::prelude::{
     run_operator,
-    OperatorConfig, ChildConfig, ClientConfig,
-    K8sType, K8sResource, HandlerImpl, SyncRequest, SyncResponse,
+    OperatorConfig, ChildConfig,
+    K8sType, K8sResource, HandlerImpl, SyncRequest,
 };
 use roperator::serde_json::{json, Value};
 use roperator::failure::Error;
-
-use std::sync::Arc;
 
 /// Name of our operator, which is automatically added as a label value in all of the child resources we create
 const OPERATOR_NAME: &str = "echoserver-example";
@@ -73,10 +71,6 @@ fn main() {
             .with_child(K8sType::pod(), ChildConfig::recreate())
             .with_child(K8sType::service(), ChildConfig::replace());
 
-    // Since you'll likely be running this example on a dev machine, we'll attempt to load the client configuration from your ~/.kube/config file.
-    // You'll most likely want to use `from_service_account` function in production.
-    let client_config = ClientConfig::from_kubeconfig(OPERATOR_NAME).expect("Failed to load client configuration from kubeconfig");
-
     let handler = HandlerImpl::default()
             .determine_children(|req: &SyncRequest| {
                 // This function should return the desired children based on the given parent in the request
@@ -90,7 +84,7 @@ fn main() {
             });
 
     // `run_operator` will never return under normal circumstances, so we only need to handle the sad path here
-    let err = run_operator(operator_config, client_config, handler);
+    let err = run_operator(operator_config, handler);
     log::error!("Error running operator: {:?}", err);
     std::process::exit(1);
 }

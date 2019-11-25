@@ -1,6 +1,6 @@
 # This is an example instance of the custom resource defined in crd.yaml
-# You need to first create the CRD using `kubectl apply -f crd.yaml` before
-# you can create this resource by using `kubectl apply -f example.yaml`
+# You need to first create the CRD using `kubectl apply -f examples/echo-server/crd.yaml` before
+# you can create this resource by using `kubectl apply -f examples/echo-server/example.yaml`
 apiVersion: example.roperator.com/v1alpha1
 kind: EchoServer
 metadata:
