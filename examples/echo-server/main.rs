@@ -90,6 +90,7 @@ fn get_current_status_message(request: &SyncRequest) -> String {
             .to_owned()
 }
 
+
 /// Returns the children that we want for the given parent
 fn get_desired_children(request: &SyncRequest) -> Result<Vec<Value>, Error> {
     let custom_resource: EchoServer = request.deserialize_parent()?;

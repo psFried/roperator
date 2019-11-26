@@ -2,6 +2,7 @@ mod request;
 
 use crate::config::{ClientConfig, K8sType, CAData, Credentials};
 use crate::resource::ObjectIdRef;
+use crate::runner::metrics::ClientMetrics;
 
 use http::{Request, Response};
 use hyper::client::Client as HyperClient;
@@ -80,6 +81,7 @@ impl From<serde_json::Error> for Error {
 struct ClientInner {
     http_client: HyperClient<HttpsConnector<HttpConnector>>,
     config: ClientConfig,
+    metrics: ClientMetrics,
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +90,7 @@ pub struct Client(Arc<ClientInner>);
 
 impl Client {
 
-    pub fn new(mut config: ClientConfig) -> Result<Client, io::Error> {
+    pub fn new(mut config: ClientConfig, metrics: ClientMetrics) -> Result<Client, io::Error> {
         let mut http = HttpConnector::new();
         http.enforce_http(false);
 
@@ -145,6 +147,7 @@ impl Client {
         let inner = ClientInner {
             http_client: client,
             config,
+            metrics,
         };
         Ok(Client(Arc::new(inner)))
     }
@@ -252,9 +255,11 @@ impl Client {
 
     async fn private_execute_request(&self, start_time: Instant, method: &str, uri: &str, req: Request<Body>) -> Result<Response<Body>, Error> {
         log::debug!("Starting {} request to: {}", method, uri);
-
+        // we measure duration separately for the logs and for the prometheus metrics... should figure out an alternative
+        let timer = self.0.metrics.request_started();
         let result = self.0.http_client.request(req).await;
         let duration = start_time.elapsed().as_millis();
+        timer.observe_duration();
         match result {
             Ok(resp) => {
                 let status_code = resp.status().as_u16();

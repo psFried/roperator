@@ -1,6 +1,8 @@
 mod informer;
 mod reconcile;
 mod client;
+mod server;
+mod metrics;
 
 use crate::resource::{K8sResource, ObjectId, K8sTypeRef};
 use crate::config::{OperatorConfig, ClientConfig, K8sType, UpdateStrategy};
@@ -8,11 +10,12 @@ use crate::runner::informer::{ResourceMessage, ResourceMonitor, EventType, Label
 use crate::runner::reconcile::SyncHandler;
 use client::Client;
 use crate::handler::{SyncRequest, Handler};
+use metrics::Metrics;
 
 use failure::Error;
 use tokio::sync::mpsc::{Sender, Receiver};
 use tokio::prelude::*;
-use tokio::runtime::Runtime;
+use tokio::runtime::{Runtime, TaskExecutor};
 
 use std::time::{Instant, Duration};
 use std::sync::Arc;
@@ -59,7 +62,8 @@ pub fn run_operator(config: OperatorConfig, handler: impl Handler) -> Error {
 /// Starts the operator and blocks the current thread indefinitely until the operator shuts down due to an error.
 pub fn run_operator_with_client_config(config: OperatorConfig, client_config: ClientConfig, handler: impl Handler) -> Error {
     let handler = Arc::new(handler);
-    let client = match Client::new(client_config) {
+    let metrics = Metrics::new();
+    let client = match Client::new(client_config, metrics.client_metrics()) {
         Ok(c) => c,
         Err(err) => return err.into(),
     };
@@ -68,8 +72,9 @@ pub fn run_operator_with_client_config(config: OperatorConfig, client_config: Cl
         Err(err) => return err.into(),
     };
     let running = Arc::new(AtomicBool::new(true));
+    let executor = runtime.executor();
     runtime.block_on(async move {
-        run_with_client(running, config, client, handler).await;
+        run_with_client(executor, metrics, running, config, client, handler).await;
     });
     log::warn!("Operator stopped, shutting down runtime");
     runtime.shutdown_on_idle();
@@ -83,13 +88,15 @@ pub fn run_operator_with_client_config(config: OperatorConfig, client_config: Cl
 /// the http client due to invalid configuration.
 pub fn start_operator_with_runtime(runtime: &Runtime, config: OperatorConfig, client_config: ClientConfig, handler: impl Handler) -> Result<OperatorHandle, Error> {
     let handler = Arc::new(handler);
-    let client = Client::new(client_config)?;
+    let metrics = Metrics::new();
+    let client = Client::new(client_config, metrics.client_metrics())?;
     let running = Arc::new(AtomicBool::new(true));
     let handle = OperatorHandle {
         running: running.clone(),
     };
+    let executor = runtime.executor();
     runtime.spawn(async move {
-        run_with_client(running.clone(), config, client, handler).await;
+        run_with_client(executor, metrics, running.clone(), config, client, handler).await;
     });
     Ok(handle)
 }
@@ -101,8 +108,9 @@ pub(crate) struct ChildRuntimeConfig {
     child_type: Arc<K8sType>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub(crate) struct RuntimeConfig {
+    pub metrics: Metrics,
     pub child_types: HashMap<K8sTypeRef<'static>, ChildRuntimeConfig>,
     pub parent_type: Arc<K8sType>,
     pub correlation_label_name: String,
@@ -116,19 +124,22 @@ impl RuntimeConfig {
     }
 }
 
-async fn run_with_client(running: Arc<AtomicBool>, config: OperatorConfig, client: Client, handler: Arc<dyn Handler>) {
-    let OperatorConfig {parent, child_types, namespace, operator_name, tracking_label_name, ownership_label_name} = config;
+async fn run_with_client(executor: TaskExecutor, metrics: Metrics, running: Arc<AtomicBool>, config: OperatorConfig, client: Client, handler: Arc<dyn Handler>) {
+    log::debug!("Starting operator with configuration: {:?}", config);
+    let OperatorConfig {parent, child_types, namespace, operator_name, tracking_label_name, ownership_label_name,
+            server_port, expose_health, expose_metrics } = config;
 
     let parent_type = Arc::new(parent);
-
     let (tx, rx) = tokio::sync::mpsc::channel::<ResourceMessage>(1024);
 
-    let parent_monitor = informer::start_parent_monitor(namespace.clone(), parent_type.clone(), client.clone(), tx.clone()).await;
+    let parent_metrics = metrics.watcher_metrics(&*parent_type);
+    let parent_monitor = informer::start_parent_monitor(namespace.clone(), parent_type.clone(), client.clone(), tx.clone(), parent_metrics).await;
 
     let mut child_runtime_config = HashMap::with_capacity(4);
     let mut children = HashMap::with_capacity(4);
 
     for (child_type, child_conf) in child_types {
+        let child_metrics = metrics.watcher_metrics(&child_type);
         let type_key = child_type.to_type_ref();
         let child_type = Arc::new(child_type);
         let runtime_conf = ChildRuntimeConfig {
@@ -137,10 +148,11 @@ async fn run_with_client(running: Arc<AtomicBool>, config: OperatorConfig, clien
         };
         child_runtime_config.insert(type_key, runtime_conf);
         let child_monitor = informer::start_child_monitor(tracking_label_name.clone(), namespace.clone(),
-                child_type.clone(), client.clone(), tx.clone()).await;
+                child_type.clone(), client.clone(), tx.clone(), child_metrics).await;
         children.insert(child_type, child_monitor);
     }
     let runtime_config = Arc::new(RuntimeConfig {
+        metrics,
         child_types: child_runtime_config,
         parent_type: parent_type,
         correlation_label_name: tracking_label_name,
@@ -156,10 +168,16 @@ async fn run_with_client(running: Arc<AtomicBool>, config: OperatorConfig, clien
         receiver: rx,
         in_progress_updates: HashMap::new(),
         client,
-        runtime_config,
+        runtime_config: runtime_config.clone(),
     };
 
-    state.run(handler).await;
+    if expose_metrics || expose_health {
+        let server_future = server::start(executor, server_port, runtime_config, expose_metrics, expose_health);
+        let operator_future = state.run(handler);
+        futures_util::future::join(server_future, operator_future).await;
+    } else {
+        state.run(handler).await;
+    }
 }
 
 type HandlerRef = Arc<dyn Handler>;
@@ -304,6 +322,7 @@ impl OperatorState {
     }
 
     fn handle_received_message(&mut self, message: ResourceMessage, to_sync: &mut HashSet<String>) {
+        self.runtime_config.metrics.watch_event_received();
         if message.index_key.is_none() {
             // TODO: change resourceMessage so that index_key is not an Option
             log::error!("Received a message with no index_key: {:?}", message);
@@ -324,6 +343,10 @@ impl OperatorState {
                     to_sync.insert(uid);
                     log::info!("Triggering re-try of sync on parent: {}", resource_id);
                 }
+            }
+            EventType::Deleted if resource_type == self.runtime_config.parent_type => {
+                log::debug!("Parent resource '{}' has been deleted", resource_id);
+                self.runtime_config.metrics.parent_deleted(&resource_id);
             }
             _ => {
                 if to_sync.insert(uid) {

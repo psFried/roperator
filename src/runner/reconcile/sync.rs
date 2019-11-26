@@ -25,6 +25,7 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
     let result = private_handle_sync(start_time, request, handler, client, &*runtime_config).await;
 
     let retry = if let Err(err) = result {
+        runtime_config.metrics.parent_sync_error(&parent_id);
         log::error!("Error while syncing parent: {}: {:?}", parent_id, err);
         // we'll delay for a while before sending the message that we've finished so that we can
         // prevent the main loop from re-trying too soon. Eventually we should implement a backoff

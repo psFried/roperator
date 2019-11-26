@@ -27,6 +27,7 @@ pub(crate) struct SyncHandler {
 impl SyncHandler {
 
     pub fn start_sync(self) {
+        self.runtime_config.metrics.parent_sync_started(&self.request.parent.get_object_id());
         tokio::spawn(async move {
             if self.should_finalize() {
                 self::finalize::handle_finalize(self).await;

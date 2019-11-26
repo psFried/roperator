@@ -1,6 +1,7 @@
 use crate::resource::{K8sResource, ObjectId, ObjectIdRef, InvalidResourceError};
 use crate::config::{K8sType};
 use crate::runner::client::{Client, Error as ClientError, WatchEvent, ApiError, ObjectList};
+use crate::runner::metrics::WatcherMetrics;
 
 use serde_json::Value;
 use tokio::sync::{Mutex, MutexGuard};
@@ -176,6 +177,10 @@ impl <I: ReverseIndex> CacheAndIndex<I> {
             log::info!("Clearing previous_error: {}", err);
         }
     }
+
+    fn resource_count(&self) -> usize {
+        self.cache.0.len()
+    }
 }
 
 impl CacheAndIndex<UidToIdIndex> {
@@ -331,21 +336,22 @@ impl From<SendError> for MonitorBackendErr {
 }
 
 
-pub async fn start_child_monitor(label_name: String, namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>) -> ResourceMonitor<LabelToIdIndex> {
+pub async fn start_child_monitor(label_name: String, namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<LabelToIdIndex> {
     let index = LabelToIdIndex::new(label_name.clone());
-    start_monitor(index, k8s_type, namespace, Some(label_name), client, sender).await
+    start_monitor(index, k8s_type, namespace, Some(label_name), client, sender, watcher_metrics).await
 }
 
-pub async fn start_parent_monitor(namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>) -> ResourceMonitor<UidToIdIndex> {
-    start_monitor(UidToIdIndex::new(), k8s_type, namespace, None, client, sender).await
+pub async fn start_parent_monitor(namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<UidToIdIndex> {
+    start_monitor(UidToIdIndex::new(), k8s_type, namespace, None, client, sender, watcher_metrics).await
 }
 
-async fn start_monitor<I: ReverseIndex>(index: I, k8s_type: Arc<K8sType>, namespace: Option<String>, label_selector: Option<String>, client: Client, sender: Sender<ResourceMessage>) -> ResourceMonitor<I> {
+async fn start_monitor<I: ReverseIndex>(index: I, k8s_type: Arc<K8sType>, namespace: Option<String>, label_selector: Option<String>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<I> {
 
     let cache_and_index = Arc::new(Mutex::new(CacheAndIndex::new(index)));
     let frontend = ResourceMonitor { cache_and_index: cache_and_index.clone() };
 
     let backend = ResourceMonitorBackend {
+        metrics: watcher_metrics,
         cache_and_index,
         client,
         k8s_type,
@@ -360,6 +366,7 @@ async fn start_monitor<I: ReverseIndex>(index: I, k8s_type: Arc<K8sType>, namesp
 }
 
 struct ResourceMonitorBackend<I: ReverseIndex> {
+    metrics: WatcherMetrics,
     cache_and_index: Arc<Mutex<CacheAndIndex<I>>>,
     client: Client,
     k8s_type: Arc<K8sType>,
@@ -405,6 +412,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         lock.is_initialized = false;
 
         if !is_http_410 {
+            self.metrics.error();
             let when = tokio::clock::now() + std::time::Duration::from_secs(10);
             tokio::timer::delay(when).await;
         }
@@ -414,6 +422,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
 
     async fn run_inner(&mut self, mut resource_version: String) -> Result<(), MonitorBackendErr> {
         loop {
+            self.metrics.request_started();
             let result = self.do_watch(&resource_version).await;
             log::debug!("Watch of {:?} ended with result: {:?}", self.k8s_type, result);
 
@@ -445,6 +454,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         loop {
             let maybe_next = lines.next().await;
             if let Some(result) = maybe_next {
+                self.metrics.event_received();
                 let event = result?;
                 let event_version = self.handle_event(event).await?;
                 new_version = Some(event_version);
@@ -482,6 +492,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
             }
         }
 
+        self.metrics.set_resource_count(cache_and_index.resource_count());
         let to_send = ResourceMessage { event_type, resource_type, resource_id, index_key };
         self.sender.send(to_send).await?;
         Ok(resource_version)
@@ -494,7 +505,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         cache_and_index.is_initialized = false;
         cache_and_index.clear_all();
 
-
+        self.metrics.request_started();
         let list = self.client.list_all(&*self.k8s_type, self.namespace.as_ref().map(String::as_str), self.label_selector.as_ref().map(String::as_str)).await?;
         // safe unwrap since RawApi can only fail when setting the request body, but it's hard coded to an empty veec
         let ObjectList {metadata, items} = list;
@@ -517,7 +528,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
             cache_and_index.add(resource);
             self.sender.send(message).await?;
         }
-
+        self.metrics.set_resource_count(cache_and_index.resource_count());
         // set the initialization flag, which will allow the frontend to read from the cache
         cache_and_index.is_initialized = true;
         // drop the cache_and_index lock when we exit this function, which allows consumers to read from it

@@ -56,6 +56,9 @@ pub struct OperatorConfig {
     pub operator_name: String,
     pub tracking_label_name: String,
     pub ownership_label_name: String,
+    pub server_port: u16,
+    pub expose_metrics: bool,
+    pub expose_health: bool,
 }
 
 impl OperatorConfig {
@@ -68,6 +71,9 @@ impl OperatorConfig {
             namespace: None,
             tracking_label_name: DEFAULT_TRACKING_LABEL_NAME.to_owned(),
             ownership_label_name: DEFAULT_OWNERSHIP_LABEL_NAME.to_owned(),
+            server_port: 8080,
+            expose_metrics: true,
+            expose_health: true,
         }
     }
 
@@ -78,6 +84,21 @@ impl OperatorConfig {
 
     pub fn with_child(mut self, child_type: K8sType, config: ChildConfig) -> Self {
         self.child_types.insert(child_type, config);
+        self
+    }
+
+    pub fn expose_health(mut self, expose_health: bool) -> Self {
+        self.expose_health = expose_health;
+        self
+    }
+
+    pub fn expose_metrics(mut self, expose_metrics: bool) -> Self {
+        self.expose_metrics = expose_metrics;
+        self
+    }
+
+    pub fn server_port(mut self, port: u16) -> Self {
+        self.server_port = port;
         self
     }
 }
