@@ -48,6 +48,9 @@ pub struct EchoServerStatus {
 }
 
 fn main() {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "roperator=info");
+    }
     env_logger::init();
 
     // first create an `OperatorConfig` struct that holds the types of the parent and child resources we'll be dealing with.
