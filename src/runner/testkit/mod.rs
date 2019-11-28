@@ -33,6 +33,12 @@ impl <T> From<T> for Error where T: TestError {
     }
 }
 
+macro_rules! test_error {
+    ($message:tt) => {{
+        Box::new(TestKitError(format!($message))) as Error
+    }};
+}
+
 pub struct TestKit {
     state: OperatorState,
     handler: HandlerRef,
@@ -197,10 +203,12 @@ impl TestKit {
 
     pub fn run_reconciliation(&mut self, fail_on_handler_error: bool, max_timeout: Duration) -> Result<(), Error> {
         let TestKit {ref mut state, ref mut parents_needing_sync, ref handler, ref instrumented_handler, ref mut runtime, ..} = *self;
-        // TODO: check the running flag and return an error if it's false
         let result = runtime.block_on(async {
             do_reconciliation_run(state, parents_needing_sync, handler, instrumented_handler, max_timeout).await
         });
+        if !state.is_running() {
+            return Err(test_error!("Operator has stopped due to an error"));
+        }
 
         if fail_on_handler_error {
             // Return any handler errors first, before we return any timeout errors
@@ -379,6 +387,17 @@ impl Display for HandlerErrors {
         Ok(())
     }
 }
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TestKitError(String);
+
+impl Display for TestKitError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Test Error: {}", self.0)
+    }
+}
+impl std::error::Error for TestKitError {}
+
 
 
 /// Error representing an operator that never "settled" after repeated attempts to sync or finalize. This condition would manifest

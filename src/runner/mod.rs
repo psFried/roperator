@@ -318,7 +318,6 @@ impl OperatorState {
 
 
     /// Tries to receive a whole batch of messages, so that we can consolidate them by parent id
-    /// TODO: make the timeouts for these batches configurable
     async fn get_parent_uids_to_update(&mut self, to_sync: &mut HashSet<String>, timeout: Duration) {
         let starting_to_sync_len = to_sync.len();
         let start_time = Instant::now();
