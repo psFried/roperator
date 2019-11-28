@@ -362,7 +362,7 @@ async fn do_reconciliation_run(state: &mut OperatorState, parents_needing_sync: 
     Err(Box::new(ReconciliationIncompleteError {
         records,
         timeout: max_timeout,
-    }))
+    }) as Error)
 }
 
 #[derive(Debug)]
