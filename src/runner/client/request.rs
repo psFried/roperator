@@ -62,6 +62,13 @@ pub fn patch_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &Obje
     Ok(req)
 }
 
+pub fn get_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<Request<Body>, Error> {
+    let url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
+
+    let req = make_req(url, Method::GET, client_config).body(Body::empty()).unwrap();
+    Ok(req)
+}
+
 pub fn create_request(client_config: &ClientConfig, k8s_type: &K8sType, resource: &Value) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, get_namespace(resource), None);
 

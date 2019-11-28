@@ -1,8 +1,10 @@
 mod informer;
-mod reconcile;
+pub(crate) mod reconcile;
 mod client;
 mod server;
 mod metrics;
+
+pub mod testkit;
 
 use crate::resource::{K8sResource, ObjectId, K8sTypeRef};
 use crate::config::{OperatorConfig, ClientConfig, K8sType, UpdateStrategy};
@@ -16,6 +18,7 @@ use failure::Error;
 use tokio::sync::mpsc::{Sender, Receiver};
 use tokio::prelude::*;
 use tokio::runtime::{Runtime, TaskExecutor};
+use tokio::executor::Executor;
 
 use std::time::{Instant, Duration};
 use std::sync::Arc;
@@ -77,7 +80,7 @@ pub fn run_operator_with_client_config(config: OperatorConfig, client_config: Cl
         run_with_client(executor, metrics, running, config, client, handler).await;
     });
     log::warn!("Operator stopped, shutting down runtime");
-    runtime.shutdown_on_idle();
+    runtime.shutdown_now();
     // return an error here, since the operator will never exit under normal circumstances
     failure::format_err!("Operator shutdown unexpectedly")
 }
@@ -124,16 +127,29 @@ impl RuntimeConfig {
     }
 }
 
-async fn run_with_client(executor: TaskExecutor, metrics: Metrics, running: Arc<AtomicBool>, config: OperatorConfig, client: Client, handler: Arc<dyn Handler>) {
+async fn run_with_client(mut executor: TaskExecutor, metrics: Metrics, running: Arc<AtomicBool>, config: OperatorConfig, client: Client, handler: Arc<dyn Handler>) {
     log::debug!("Starting operator with configuration: {:?}", config);
-    let OperatorConfig {parent, child_types, namespace, operator_name, tracking_label_name, ownership_label_name,
-            server_port, expose_health, expose_metrics } = config;
+    let server_port = config.server_port;
+    let expose_metrics = config.expose_metrics;
+    let expose_health = config.expose_health;
+    let mut state = create_operator_state(&mut executor, metrics, running, config, client).await;
+    if expose_metrics || expose_health {
+        let server_future = server::start(executor, server_port, state.runtime_config.clone(), expose_metrics, expose_health);
+        let operator_future = state.run(handler);
+        futures_util::future::join(server_future, operator_future).await;
+    } else {
+        state.run(handler).await;
+    }
+}
+
+async fn create_operator_state(executor: &mut impl Executor, metrics: Metrics, running: Arc<AtomicBool>, config: OperatorConfig, client: Client) -> OperatorState {
+    let OperatorConfig {parent, child_types, namespace, operator_name, tracking_label_name, ownership_label_name, .. } = config;
 
     let parent_type = Arc::new(parent);
     let (tx, rx) = tokio::sync::mpsc::channel::<ResourceMessage>(1024);
 
     let parent_metrics = metrics.watcher_metrics(&*parent_type);
-    let parent_monitor = informer::start_parent_monitor(namespace.clone(), parent_type.clone(), client.clone(), tx.clone(), parent_metrics).await;
+    let parent_monitor = informer::start_parent_monitor(executor, namespace.clone(), parent_type.clone(), client.clone(), tx.clone(), parent_metrics);
 
     let mut child_runtime_config = HashMap::with_capacity(4);
     let mut children = HashMap::with_capacity(4);
@@ -147,8 +163,8 @@ async fn run_with_client(executor: TaskExecutor, metrics: Metrics, running: Arc<
             update_strategy: child_conf.update_strategy,
         };
         child_runtime_config.insert(type_key, runtime_conf);
-        let child_monitor = informer::start_child_monitor(tracking_label_name.clone(), namespace.clone(),
-                child_type.clone(), client.clone(), tx.clone(), child_metrics).await;
+        let child_monitor = informer::start_child_monitor(executor, tracking_label_name.clone(), namespace.clone(),
+                child_type.clone(), client.clone(), tx.clone(), child_metrics);
         children.insert(child_type, child_monitor);
     }
     let runtime_config = Arc::new(RuntimeConfig {
@@ -160,7 +176,7 @@ async fn run_with_client(executor: TaskExecutor, metrics: Metrics, running: Arc<
         operator_name,
     });
 
-    let mut state = OperatorState {
+    OperatorState {
         running,
         parents: parent_monitor,
         children,
@@ -169,19 +185,12 @@ async fn run_with_client(executor: TaskExecutor, metrics: Metrics, running: Arc<
         in_progress_updates: HashMap::new(),
         client,
         runtime_config: runtime_config.clone(),
-    };
-
-    if expose_metrics || expose_health {
-        let server_future = server::start(executor, server_port, runtime_config, expose_metrics, expose_health);
-        let operator_future = state.run(handler);
-        futures_util::future::join(server_future, operator_future).await;
-    } else {
-        state.run(handler).await;
     }
 }
 
 type HandlerRef = Arc<dyn Handler>;
 
+#[derive(Debug)]
 struct InProgressUpdate {
     parent_id: ObjectId,
     start_time: Instant,
@@ -196,6 +205,7 @@ impl InProgressUpdate {
     }
 }
 
+#[derive(Debug)]
 struct OperatorState {
     running: Arc<AtomicBool>,
     parents: ResourceMonitor<UidToIdIndex>,
@@ -211,34 +221,50 @@ struct OperatorState {
 impl OperatorState {
 
     async fn run(&mut self, handler: HandlerRef) {
-        let mut parent_ids_to_sync: HashSet<String> = HashSet::with_capacity(16);
-        let mut synced_parents: HashSet<String> = HashSet::with_capacity(16);
-
+        let mut parent_ids_to_sync = HashSet::with_capacity(16);
         while self.running.load(Ordering::Relaxed) {
-            log::debug!("Starting sync loop with {} existing parents needing to sync", parent_ids_to_sync.len());
-            self.get_parent_uids_to_update(&mut parent_ids_to_sync).await;
-            if !self.running.load(Ordering::Relaxed) {
-                // getting the uids to update can take quite a while, so we'll do an extra check to see
-                // if the operator has been shutdown in the meantime
-                break;
-            }
-            for parent_uid in parent_ids_to_sync.iter() {
-                if !self.is_update_in_progress(parent_uid) {
-                    let result = self.sync_parent(parent_uid.as_str(), handler.clone()).await;
-                    if let Err(err) = result {
-                        log::error!("Cannot sync parent with uid: {} due to error: {:?}", parent_uid, err);
-                    } else {
-                        synced_parents.insert(parent_uid.clone());
-                    }
-                }
-            }
-
-            // TODO: replace this second hashset with a call to `parent_ids_to_sync.retain`
-            for id in synced_parents.drain() {
-                parent_ids_to_sync.remove(&id);
-            }
+            let timeout = if parent_ids_to_sync.is_empty() {
+                Duration::from_secs(3600)
+            } else {
+                Duration::from_secs(1)
+            };
+            self.run_once(&mut parent_ids_to_sync, &handler, timeout).await;
         }
         log::info!("Shutting down operator");
+    }
+
+    async fn run_once(&mut self, parent_ids_to_sync: &mut HashSet<String>, handler: &HandlerRef, timeout: Duration) {
+        log::debug!("Starting sync loop with {} existing parents needing to sync", parent_ids_to_sync.len());
+        self.get_parent_uids_to_update(parent_ids_to_sync, timeout).await;
+        if !self.running.load(Ordering::Relaxed) {
+            // getting the uids to update can take quite a while, so we'll do an extra check to see
+            // if the operator has been shutdown in the meantime
+            return;
+        }
+
+        let mut synced_parents = Vec::new();
+        for parent_uid in parent_ids_to_sync.iter() {
+            if !self.is_update_in_progress(parent_uid) {
+                let result = self.sync_parent(parent_uid.as_str(), handler.clone()).await;
+                if let Err(err) = result {
+                    log::error!("Cannot sync parent with uid: {} due to error: {:?}", parent_uid, err);
+                } else {
+                    synced_parents.push(parent_uid.clone());
+                }
+            }
+        }
+
+        for id in synced_parents {
+            parent_ids_to_sync.remove(&id);
+        }
+    }
+
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
+    }
+
+    fn is_any_update_in_progress(&self) -> bool {
+        !self.in_progress_updates.is_empty()
     }
 
     fn is_update_in_progress(&self, parent_uid: &str) -> bool {
@@ -293,13 +319,13 @@ impl OperatorState {
 
     /// Tries to receive a whole batch of messages, so that we can consolidate them by parent id
     /// TODO: make the timeouts for these batches configurable
-    async fn get_parent_uids_to_update(&mut self, to_sync: &mut HashSet<String>) {
+    async fn get_parent_uids_to_update(&mut self, to_sync: &mut HashSet<String>, timeout: Duration) {
         let starting_to_sync_len = to_sync.len();
         let start_time = Instant::now();
         let mut first_receive_time = start_time;
         // the initial timeout will be pretty long, but as soon as we receive the first message
         // we'll start to use a much shorter timeout for receiving subsequent messages
-        let mut timeout = Duration::from_secs(30);
+        let mut timeout = timeout;
         let mut total_messages: usize = 0;
 
         while let Some(message) = self.recv_next(timeout).await {
@@ -313,7 +339,7 @@ impl OperatorState {
             // if we've been going for over a second, then we'll use a super short timeout so that
             // we can start syncing as soon as possible
             let elapsed = first_receive_time.elapsed();
-            timeout = Duration::from_millis(500).checked_sub(elapsed).unwrap_or(Duration::from_millis(1));
+            timeout = Duration::from_millis(500).min(timeout).checked_sub(elapsed).unwrap_or(Duration::from_millis(1));
         }
         let elapsed_millis = duration_to_millis(start_time.elapsed());
         let new_to_sync = to_sync.len() - starting_to_sync_len;

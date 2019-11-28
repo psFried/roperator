@@ -195,6 +195,13 @@ impl <'a> PairRef<'a> {
         PairRef(a, b)
     }
 
+    pub fn to_owned(&self) -> PairRef<'static> {
+        let PairRef(ref a, ref b) = self;
+        let a: Cow<'static, str> = Cow::Owned(a.clone().into_owned());
+        let b: Cow<'static, str> = Cow::Owned(b.clone().into_owned());
+        PairRef(a, b)
+    }
+
     pub fn new(a: impl Into<Cow<'a, str>>, b: impl Into<Cow<'a, str>>) -> Self {
         PairRef(a.into(), b.into())
     }
@@ -215,6 +222,10 @@ pub struct K8sTypeRef<'a>(PairRef<'a>);
 impl <'a> K8sTypeRef<'a> {
     pub fn into_owned(self) -> K8sTypeRef<'static> {
         K8sTypeRef(self.0.into_owned())
+    }
+
+    pub fn to_owned(&self) -> K8sTypeRef<'static> {
+        K8sTypeRef(self.0.to_owned())
     }
 
     pub fn new(api_version: impl Into<Cow<'a, str>>, kind: impl Into<Cow<'a, str>>) -> Self {
@@ -266,6 +277,10 @@ pub struct ObjectIdRef<'a>(PairRef<'a>);
 impl <'a> ObjectIdRef<'a> {
     pub fn into_owned(self) -> ObjectId {
         ObjectIdRef(self.0.into_owned())
+    }
+
+    pub fn to_owned(&self) -> ObjectId {
+        ObjectIdRef(self.0.to_owned())
     }
 
     pub fn new(namespace: impl Into<Cow<'a, str>>, name: impl Into<Cow<'a, str>>) -> Self {

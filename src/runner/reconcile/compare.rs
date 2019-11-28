@@ -29,7 +29,12 @@ impl <'a> Diffs<'a> {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+
+    pub fn into_vec(self) -> Vec<Diff<'a>> {
+        self.0
+    }
 }
+
 
 impl <'a> Display for Diffs<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

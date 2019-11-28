@@ -193,6 +193,9 @@ impl K8sType {
         }
     }
 
+    pub fn namespaces() -> K8sType {
+        K8sType::new("", "v1", "Namespace", "namespaces")
+    }
 
     pub fn pod() -> K8sType {
         K8sType {

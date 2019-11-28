@@ -4,18 +4,31 @@ use serde_json::{Value};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 
 /// The type passed to the Handler that provides a snapshot view of the parent Custom Resource and all of the children
 /// as they exist in the Kubernetes cluster. The handler will be passed an immutable reference to this struct.
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, PartialEq)]
 pub struct SyncRequest {
     /// The parent custom resource instance
     pub parent: K8sResource,
     /// The entire set of children related to this parent instance, as they exist in the cluster at the time.
     /// In the happy path, this will include all of the children that have been returned in a previous `SyncResponse`
     pub children: Vec<K8sResource>,
+}
+
+impl Debug for SyncRequest {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("SyncRequst: ")?;
+        let as_string = if f.alternate() {
+            serde_json::to_string_pretty(self)
+        } else {
+            serde_json::to_string(self)
+        }.map_err(|_| fmt::Error)?;
+
+        f.write_str(as_string.as_str())
+    }
 }
 
 impl SyncRequest {
@@ -62,6 +75,7 @@ impl SyncRequest {
 
 /// A view of a subset of child resouces that share a given apiVersion and kind. This view has accessors
 /// for retrieving deserialized child resources.
+#[derive(Debug)]
 pub struct TypedView<'a, T: DeserializeOwned> {
     api_version: &'a str,
     kind: &'a str,
@@ -107,6 +121,7 @@ impl <'a, T: DeserializeOwned> TypedView<'a, T> {
 }
 
 /// An iterator over child resources ov a given type that deserializes each item
+#[derive(Debug)]
 pub struct TypedIter<'a, T: DeserializeOwned> {
     req: &'a SyncRequest,
     index: usize,
@@ -143,10 +158,11 @@ impl <'a, T: DeserializeOwned> Iterator for TypedIter<'a, T> {
 
 /// A view of raw `K8sResource` children that share the same apiVersion and kind, which provides
 /// convenient accessor functions
+#[derive(Debug)]
 pub struct RawView<'a>{
-    req: &'a SyncRequest,
     api_version: &'a str,
     kind: &'a str,
+    req: &'a SyncRequest,
 }
 
 impl <'a> RawView<'a> {
@@ -176,6 +192,7 @@ impl <'a> RawView<'a> {
 /// A view of all of the children from a `SyncRequest`, which has convenient accessors for getting (and optionally deserializing)
 /// child resources. This view represents a snapshot of the known state of all the children that are related to a specific parent.
 /// The parent status should be computed from this view, NOT from the _desired_ children returned from your handler.
+#[derive(Debug)]
 pub struct RequestChildren<'a>(&'a SyncRequest);
 impl <'a> RequestChildren<'a> {
 
@@ -219,6 +236,17 @@ pub struct SyncResponse {
     pub children: Vec<Value>,
 }
 
+impl Debug for SyncResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let as_string = if f.alternate() {
+            serde_json::to_string_pretty(self)
+        } else {
+            serde_json::to_string(self)
+        }.map_err(|_| fmt::Error)?;
+        write!(f, "SyncResponse: {}", as_string)
+    }
+}
+
 impl SyncResponse {
     /// Constructs a new empty `SyncResponse` with the given parent status
     pub fn new(status: Value) -> SyncResponse {
@@ -243,10 +271,20 @@ impl SyncResponse {
 
 /// The response returned from a finalize function. Finalize functions may not return any children, but they may
 /// modify the parent status.
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, PartialEq)]
 pub struct FinalizeResponse {
     pub status: Value,
     pub finalized: bool,
+}
+impl Debug for FinalizeResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let as_string = if f.alternate() {
+            serde_json::to_string_pretty(self)
+        } else {
+            serde_json::to_string(self)
+        }.map_err(|_| fmt::Error)?;
+        write!(f, "FinalizeResponse: {}", as_string)
+    }
 }
 
 /// Trait for errors that can be returned from a Handler function. This just enforces all of the
@@ -311,177 +349,3 @@ impl <F> Handler for F where F: Fn(&SyncRequest) -> Result<SyncResponse, Error> 
         self(req)
     }
 }
-
-
-// #[derive(Debug)]
-// pub struct ImpossibleError;
-// impl Display for ImpossibleError {
-//     fn fmt(&self, _: &mut fmt::Formatter) -> fmt::Result {
-//         unimplemented!()
-//     }
-// }
-// impl std::error::Error for ImpossibleError {}
-
-// pub trait DetermineChildren: 'static + Send + Sync {
-//     type Error: std::error::Error;
-
-//     fn determine_children(&self, request: &SyncRequest) -> Result<Vec<Value>, Self::Error>;
-// }
-
-// impl <F> DetermineChildren for F where F: 'static + Send + Sync + Fn(&SyncRequest) -> Vec<Value> {
-//     type Error = ImpossibleError;
-//     fn determine_children(&self, request: &SyncRequest) -> Result<Vec<Value>, Self::Error> {
-//         Ok(self(request))
-//     }
-// }
-
-// impl <F, E> DetermineChildren for F where F: 'static + Send + Sync + Fn(&SyncRequest) -> Result<Vec<Value>, E>, E: std::error::Error {
-//     type Error = E;
-
-//     fn determine_children(&self, request: &SyncRequest) -> Result<Vec<Value>, Self::Error> {
-//         self(request)
-//     }
-// }
-
-// pub trait DetermineStatus: 'static + Send + Sync {
-//     type Error: std::error::Error;
-
-//     fn determine_status(&self, req: &SyncRequest) -> Result<Value, Self::Error>;
-// }
-
-// impl <T, F, E> DetermineStatus for F where F: 'static + Send + Sync + Fn(&SyncRequest) -> Result<Value, E>, T: Serialize, E: std::error::Error {
-//     type Error = E;
-
-//     fn determine_status(&self, req: &SyncRequest) -> Result<Value, Self::Error> {
-//         self(req)
-//     }
-// }
-
-// pub trait HandleFinalize: 'static + Send + Sync {
-//     fn finalize(&self, req: &SyncRequest) -> Result<bool, failure::Error>;
-// }
-
-// impl <F, R> HandleFinalize for F where F: 'static + Send + Sync + Fn(&SyncRequest) -> R, Result<bool, failure::Error>: From<R> {
-//     fn finalize(&self, req: &SyncRequest) -> Result<bool, failure::Error> {
-//         self(req).into()
-//     }
-// }
-
-// /// A convenient `Handler` implementation that breaks down the sync handling into smaller parts,
-// /// and also does some error handling.
-// pub struct HandlerImpl {
-//     pub operator_error_status_field: String,
-//     pub determine_status: Box<dyn DetermineStatus>,
-//     pub determine_children: Box<dyn DetermineChildren>,
-//     pub handle_finalize: Box<dyn HandleFinalize>,
-// }
-
-// impl Default for HandlerImpl {
-//     fn default() -> HandlerImpl {
-//         HandlerImpl {
-//             operator_error_status_field: "operatorError".to_owned(),
-//             determine_status: Box::new(default_status_function),
-//             determine_children: Box::new(default_determine_children_function),
-//             handle_finalize: Box::new(default_finalize_function),
-//         }
-//     }
-// }
-
-// impl HandlerImpl {
-
-//     pub fn error_status_field(mut self, field_name: impl Into<String>) -> Self {
-//         self.operator_error_status_field = field_name.into();
-//         self
-//     }
-
-//     pub fn determine_status(mut self, determine_status: impl DetermineStatus) -> Self {
-//         self.determine_status = Box::new(determine_status);
-//         self
-//     }
-
-//     pub fn determine_children(mut self, determine_children: impl DetermineChildren) -> Self {
-//         self.determine_children = Box::new(determine_children);
-//         self
-//     }
-
-//     pub fn handle_finalize(mut self, handle_finalize: impl HandleFinalize) -> Self {
-//         self.handle_finalize = Box::new(handle_finalize);
-//         self
-//     }
-
-//     fn make_status_value(&self, req: &SyncRequest) -> Value {
-//         let status = self.determine_status.determine_status(req).unwrap_or_else(|err| {
-//             log::error!("Failed to determine status for parent: {}, error: {:?}", req.parent.get_object_id(), err);
-
-//             serde_json::json!({
-//                 self.operator_error_status_field.as_str() : format!("Failed to determine status: {}", err),
-//             })
-//         });
-//         ensure_status_is_object_or_null(status)
-//     }
-// }
-
-// impl <E: std::error::Error> Handler for HandlerImpl {
-//     type Error = E;
-
-//     fn sync(&self, req: &SyncRequest) -> Result<SyncResponse, E> {
-//         let mut status = self.make_status_value(req);
-//         let ResponseChildren {children, error} = self.determine_children.determine_children(req);
-//         if let Some(err) = error {
-//             log::error!("Failed to determine children for parent: {}, error: {:?}", req.parent.get_object_id(), err);
-//             add_error_to_status(&mut status, self.operator_error_status_field.as_str(), "Failed to determine children ", err);
-//         }
-
-//         Ok(SyncResponse {
-//             children,
-//             status
-//         })
-//     }
-
-//     fn finalize(&self, req: &SyncRequest) -> FinalizeResponse {
-//         let mut status = self.make_status_value(req);
-//         match self.handle_finalize.finalize(req) {
-//             Ok(is_finalized) => {
-//                 FinalizeResponse {
-//                     status,
-//                     finalized: is_finalized,
-//                 }
-//             }
-//             Err(err) => {
-//                 log::error!("Failed to finalize parent: {}, error: {:?}", req.parent.get_object_id(), err);
-//                 add_error_to_status(&mut status, self.operator_error_status_field.as_str(), "Finalization function failed", err);
-//                 FinalizeResponse {
-//                     status,
-//                     finalized: false,
-//                 }
-//             }
-//         }
-//     }
-// }
-
-// fn ensure_status_is_object_or_null(status: Value) -> Value {
-//     if status.is_object() || status.is_null() {
-//         status
-//     } else {
-//         serde_json::json!({
-//             "status": status
-//         })
-//     }
-// }
-
-// fn add_error_to_status(status: &mut Value, key: &str, context: &str, error: failure::Error) {
-//     if status.is_null() {
-//         *status = serde_json::json!({
-//             key: format!("\"{}: {}\"", context, error)
-//         })
-//     } else {
-//         // status must be an object because we've already ensured that
-//         let obj = status.as_object_mut().unwrap();
-//         if let Some(value) = obj.get_mut(key) {
-//             let new_value = Value::from(format!("Multiple errors: \"{}: {}\", {}", context, error, value));
-//             *value = new_value;
-//         } else {
-//             obj.insert(key.to_owned(), format!("\"{}: {}\"", context, error).into());
-//         }
-//     }
-// }

@@ -35,7 +35,15 @@ pub enum Error {
     Http(http::StatusCode),
 }
 
-impl std::error::Error for Error { }
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Io(e) => Some(e as &(dyn std::error::Error + 'static)),
+            Error::Serde(e) => Some(e as &(dyn std::error::Error + 'static)),
+            Error::Http(_) => None,
+        }
+    }
+}
 
 impl Error {
     pub fn http(status: http::StatusCode) -> Error {
@@ -185,6 +193,15 @@ impl Client {
         }
     }
 
+    pub async fn get_resource(&self, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<Option<Value>, Error> {
+        let req = request::get_request(&self.0.config, k8s_type, id)?;
+        match self.get_response_body::<Value>(req).await {
+            Ok(body) => Ok(Some(body)),
+            Err(ref e) if e.is_http_status(404) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     pub async fn create_resource(&self, k8s_type: &K8sType, resource: &Value) -> Result<(), Error> {
         let req = request::create_request(&self.0.config, k8s_type, resource)?;
         self.execute_ensure_success(req).await
@@ -216,12 +233,12 @@ impl Client {
         }
     }
 
-    pub async fn get_response_lines_deserialized<T: DeserializeOwned>(&self, req: Request<Body>) -> Result<LineDeserializer<T>, Error> {
+    async fn get_response_lines_deserialized<T: DeserializeOwned>(&self, req: Request<Body>) -> Result<LineDeserializer<T>, Error> {
         let lines = self.get_response_lines(req).await?;
         Ok(LineDeserializer::<T>::new(lines))
     }
 
-    pub async fn get_response_lines(&self, req: Request<Body>) -> Result<Lines, Error> {
+    async fn get_response_lines(&self, req: Request<Body>) -> Result<Lines, Error> {
         let resp = self.get_response(req).await?;
         if !resp.status().is_success() {
             Err(Error::http(resp.status().clone()))
@@ -230,7 +247,7 @@ impl Client {
         }
     }
 
-    pub async fn get_response(&self, req: Request<Body>) -> Result<Response<Body>, Error> {
+    async fn get_response(&self, req: Request<Body>) -> Result<Response<Body>, Error> {
         let method = req.method().to_string();
         let uri = req.uri().to_string();
         let start_time = Instant::now();
@@ -238,7 +255,7 @@ impl Client {
         self.private_execute_request(start_time, method.as_str(), uri.as_str(), req).await
     }
 
-    pub async fn get_response_body<T: DeserializeOwned>(&self, req: Request<Body>) -> Result<T, Error> {
+    async fn get_response_body<T: DeserializeOwned>(&self, req: Request<Body>) -> Result<T, Error> {
         let method = req.method().to_string();
         let uri = req.uri().to_string();
         let start_time = Instant::now();

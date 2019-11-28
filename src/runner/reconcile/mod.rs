@@ -1,4 +1,4 @@
-mod compare;
+pub(crate) mod compare;
 mod sync;
 mod finalize;
 

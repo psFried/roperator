@@ -6,6 +6,7 @@ use crate::runner::metrics::WatcherMetrics;
 use serde_json::Value;
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::sync::mpsc::{Sender, error::SendError};
+use tokio::executor::Executor;
 use failure::Error;
 
 use std::sync::{Arc};
@@ -90,7 +91,9 @@ impl ReverseIndex for LabelToIdIndex {
 
 }
 
+#[derive(Debug)]
 pub struct UidToIdIndex(HashMap<String, ObjectId>);
+
 impl UidToIdIndex {
     pub fn new() -> UidToIdIndex {
         UidToIdIndex(HashMap::new())
@@ -233,6 +236,12 @@ impl Debug for ResourceMessage {
 
 pub struct ResourceState<'a, I: ReverseIndex>(MutexGuard<'a, CacheAndIndex<I>>);
 
+impl <'a, I: ReverseIndex> ResourceState<'a, I> {
+    pub fn get_by_id(&self, id: &ObjectIdRef<'_>) -> Option<K8sResource> {
+        self.0.cache.get_copy(id)
+    }
+}
+
 impl <'a> ResourceState<'a, UidToIdIndex> {
     pub fn get_by_uid(&self, uid: &str) -> Option<K8sResource> {
         self.0.get_by_uid(uid)
@@ -336,16 +345,16 @@ impl From<SendError> for MonitorBackendErr {
 }
 
 
-pub async fn start_child_monitor(label_name: String, namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<LabelToIdIndex> {
+pub fn start_child_monitor(executor: &mut impl Executor, label_name: String, namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<LabelToIdIndex> {
     let index = LabelToIdIndex::new(label_name.clone());
-    start_monitor(index, k8s_type, namespace, Some(label_name), client, sender, watcher_metrics).await
+    start_monitor(executor, index, k8s_type, namespace, Some(label_name), client, sender, watcher_metrics)
 }
 
-pub async fn start_parent_monitor(namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<UidToIdIndex> {
-    start_monitor(UidToIdIndex::new(), k8s_type, namespace, None, client, sender, watcher_metrics).await
+pub fn start_parent_monitor(executor: &mut impl Executor, namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<UidToIdIndex> {
+    start_monitor(executor, UidToIdIndex::new(), k8s_type, namespace, None, client, sender, watcher_metrics)
 }
 
-async fn start_monitor<I: ReverseIndex>(index: I, k8s_type: Arc<K8sType>, namespace: Option<String>, label_selector: Option<String>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<I> {
+fn start_monitor<I: ReverseIndex>(executor: &mut impl Executor, index: I, k8s_type: Arc<K8sType>, namespace: Option<String>, label_selector: Option<String>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<I> {
 
     let cache_and_index = Arc::new(Mutex::new(CacheAndIndex::new(index)));
     let frontend = ResourceMonitor { cache_and_index: cache_and_index.clone() };
@@ -359,9 +368,9 @@ async fn start_monitor<I: ReverseIndex>(index: I, k8s_type: Arc<K8sType>, namesp
         label_selector,
         namespace,
     };
-    tokio::spawn(async move {
+    executor.spawn(Box::pin(async move {
         backend.run().await;
-    });
+    })).expect("Failed to spawn watcher task");
     frontend
 }
 
