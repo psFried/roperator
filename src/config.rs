@@ -1,8 +1,7 @@
 mod kubeconfig;
 
-use crate::resource::K8sTypeRef;
+use crate::k8s_types::K8sType;
 
-use std::fmt::{self, Display};
 use std::collections::HashMap;
 use std::path::Path;
 use std::io;
@@ -50,8 +49,8 @@ impl ChildConfig {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperatorConfig {
-    pub parent: K8sType,
-    pub child_types: HashMap<K8sType, ChildConfig>,
+    pub parent: &'static K8sType,
+    pub child_types: HashMap<&'static K8sType, ChildConfig>,
     pub namespace: Option<String>,
     pub operator_name: String,
     pub tracking_label_name: String,
@@ -62,7 +61,7 @@ pub struct OperatorConfig {
 }
 
 impl OperatorConfig {
-    pub fn new(operator_name: impl Into<String>, parent: K8sType) -> OperatorConfig {
+    pub fn new(operator_name: impl Into<String>, parent: &'static K8sType) -> OperatorConfig {
         let operator_name = operator_name.into();
         OperatorConfig {
             parent,
@@ -82,7 +81,7 @@ impl OperatorConfig {
         self
     }
 
-    pub fn with_child(mut self, child_type: K8sType, config: ChildConfig) -> Self {
+    pub fn with_child(mut self, child_type: &'static K8sType, config: ChildConfig) -> Self {
         self.child_types.insert(child_type, config);
         self
     }
@@ -160,72 +159,4 @@ impl ClientConfig {
     pub fn from_kubeconfig(user_agent: impl Into<String>) -> Result<ClientConfig, KubeConfigError> {
         self::kubeconfig::load_from_kubeconfig(user_agent.into())
     }
-}
-
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct K8sType {
-    pub group: String,
-    pub version: String,
-    pub plural_kind: String,
-    pub kind: String,
-}
-
-impl K8sType {
-    pub fn new(group: &str, version: &str, kind: &str, plural_kind: &str) -> K8sType {
-        K8sType {
-            group: group.to_owned(),
-            version: version.to_owned(),
-            kind: kind.to_owned(),
-            plural_kind: plural_kind.to_owned(),
-        }
-    }
-
-    pub fn to_type_ref(&self) -> K8sTypeRef<'static> {
-        K8sTypeRef::new(self.format_api_version(), self.kind.clone())
-    }
-
-    pub fn format_api_version(&self) -> String {
-        if self.group.is_empty() {
-            self.version.clone()
-        } else {
-            format!("{}/{}", self.group, self.version)
-        }
-    }
-
-    pub fn namespaces() -> K8sType {
-        K8sType::new("", "v1", "Namespace", "namespaces")
-    }
-
-    pub fn pod() -> K8sType {
-        K8sType {
-            group: String::new(),
-            version: v1(),
-            plural_kind: "pods".to_owned(),
-            kind: "Pod".to_owned(),
-        }
-    }
-
-    pub fn service() -> K8sType {
-        K8sType {
-            group: String::new(),
-            version: v1(),
-            plural_kind: "services".to_owned(),
-            kind: "Service".to_owned(),
-        }
-    }
-}
-
-impl Display for K8sType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.group.is_empty() {
-            write!(f, "{}/{}", self.version, self.plural_kind)
-        } else {
-            write!(f, "{}/{}/{}", self.group, self.version, self.plural_kind)
-        }
-    }
-}
-
-fn v1() -> String {
-    "v1".to_owned()
 }

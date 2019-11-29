@@ -38,7 +38,7 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
     let message = ResourceMessage {
         event_type: EventType::UpdateOperationComplete { retry },
         resource_id: parent_id,
-        resource_type: runtime_config.parent_type.clone(),
+        resource_type: runtime_config.parent_type,
         index_key: Some(parent_index_key),
     };
     let _ = sender.send(message).await;

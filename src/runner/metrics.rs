@@ -1,5 +1,5 @@
 use crate::resource::ObjectIdRef;
-use crate::config::K8sType;
+use crate::k8s_types::K8sType;
 
 use prometheus::{
     exponential_buckets,
@@ -110,7 +110,7 @@ impl Metrics {
 
     pub fn watcher_metrics(&self, k8s_type: &K8sType) -> WatcherMetrics {
         let api_version = k8s_type.format_api_version();
-        let labels = &[api_version.as_str(), k8s_type.kind.as_str()];
+        let labels = &[api_version.as_str(), k8s_type.kind];
         WatcherMetrics {
             watcher_requests: self.watcher_requests_by_type.with_label_values(labels),
             watcher_errors: self.watcher_errors_by_type.with_label_values(labels),

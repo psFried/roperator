@@ -24,7 +24,7 @@ pub(crate) async fn handle_finalize(handler: SyncHandler) {
     let SyncHandler { mut sender, request, handler, client, runtime_config, parent_index_key, } = handler;
 
     let parent_id = request.parent.get_object_id().into_owned();
-    let parent_type = runtime_config.parent_type.clone();
+    let parent_type = runtime_config.parent_type;
 
     let result = get_finalize_result(request, handler, client, &*runtime_config).await;
     let retry = match result {

@@ -1,4 +1,4 @@
-use crate::config::K8sType;
+use crate::k8s_types::K8sType;
 
 use serde_json::Value;
 
@@ -252,7 +252,7 @@ impl <'a> std::cmp::PartialEq<K8sType> for K8sTypeRef<'a> {
         let K8sTypeRef(PairRef(ref api_version, ref kind)) = *self;
 
         let rhs_group_len = rhs.group.len();
-        if kind == rhs.kind.as_str() && api_version.starts_with(rhs.group.as_str()) && api_version.ends_with(rhs.version.as_str()) {
+        if kind == rhs.kind && api_version.starts_with(rhs.group) && api_version.ends_with(rhs.version) {
             if !rhs.group.is_empty()  {
                 // if it has a group, then the apiVersion should be <group>/<version>, so we need to ensure that
                 // the slash is present and nothing else

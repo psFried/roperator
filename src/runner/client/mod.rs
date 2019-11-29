@@ -1,6 +1,7 @@
 mod request;
 
-use crate::config::{ClientConfig, K8sType, CAData, Credentials};
+use crate::k8s_types::K8sType;
+use crate::config::{ClientConfig, CAData, Credentials};
 use crate::resource::ObjectIdRef;
 use crate::runner::metrics::ClientMetrics;
 

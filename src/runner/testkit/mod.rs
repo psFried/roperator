@@ -5,7 +5,8 @@ use crate::{
         reconcile::compare,
         metrics::Metrics,
     },
-    config::{OperatorConfig, ClientConfig, K8sType},
+    k8s_types::K8sType,
+    config::{OperatorConfig, ClientConfig},
     handler::{self, Handler, SyncRequest, SyncResponse, FinalizeResponse},
     resource::{K8sResource, ObjectIdRef, ObjectId}
 };
@@ -82,9 +83,8 @@ impl Drop for TestKit {
             if let Some(ns) = namespace.as_ref() {
                 log::info!("Deleting test namespace: '{}'", ns);
                 let id = ObjectIdRef::new("", ns);
-                let k8s_type = K8sType::namespaces();
                 let result = runtime.block_on(async {
-                    client.delete_resource(&k8s_type, &id).await
+                    client.delete_resource(crate::k8s_types::core::v1::Namespace, &id).await
                 });
                 if let Err(err) = result {
                     log::error!("Failed to delete test namespace: '{}': {:?}", ns, err);
@@ -100,7 +100,7 @@ impl TestKit {
         let ns = namespace.into();
         let mut testkit = TestKit::create(operator_config.within_namespace(ns.as_str()), client_config, handler)?;
 
-        let ns_type = K8sType::namespaces();
+        let ns_type = crate::k8s_types::core::v1::Namespace;
         let namespace_id = ObjectIdRef::new("", ns.as_str());
 
         if testkit.get_resource(&ns_type, &namespace_id)?.is_none() {

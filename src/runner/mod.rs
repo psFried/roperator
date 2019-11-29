@@ -7,9 +7,10 @@ mod metrics;
 pub mod testkit;
 
 use crate::resource::{K8sResource, ObjectId, K8sTypeRef};
-use crate::config::{OperatorConfig, ClientConfig, K8sType, UpdateStrategy};
+use crate::config::{OperatorConfig, ClientConfig, UpdateStrategy};
 use crate::runner::informer::{ResourceMessage, ResourceMonitor, EventType, LabelToIdIndex, UidToIdIndex};
 use crate::runner::reconcile::SyncHandler;
+use crate::k8s_types::K8sType;
 use client::Client;
 use crate::handler::{SyncRequest, Handler};
 use metrics::Metrics;
@@ -108,14 +109,14 @@ pub fn start_operator_with_runtime(runtime: &Runtime, config: OperatorConfig, cl
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ChildRuntimeConfig {
     update_strategy: UpdateStrategy,
-    child_type: Arc<K8sType>,
+    child_type: &'static K8sType,
 }
 
 #[derive(Debug)]
 pub(crate) struct RuntimeConfig {
     pub metrics: Metrics,
     pub child_types: HashMap<K8sTypeRef<'static>, ChildRuntimeConfig>,
-    pub parent_type: Arc<K8sType>,
+    pub parent_type: &'static K8sType,
     pub correlation_label_name: String,
     pub controller_label_name: String,
     pub operator_name: String,
@@ -145,11 +146,10 @@ async fn run_with_client(mut executor: TaskExecutor, metrics: Metrics, running: 
 async fn create_operator_state(executor: &mut impl Executor, metrics: Metrics, running: Arc<AtomicBool>, config: OperatorConfig, client: Client) -> OperatorState {
     let OperatorConfig {parent, child_types, namespace, operator_name, tracking_label_name, ownership_label_name, .. } = config;
 
-    let parent_type = Arc::new(parent);
     let (tx, rx) = tokio::sync::mpsc::channel::<ResourceMessage>(1024);
 
-    let parent_metrics = metrics.watcher_metrics(&*parent_type);
-    let parent_monitor = informer::start_parent_monitor(executor, namespace.clone(), parent_type.clone(), client.clone(), tx.clone(), parent_metrics);
+    let parent_metrics = metrics.watcher_metrics(parent);
+    let parent_monitor = informer::start_parent_monitor(executor, namespace.clone(), parent, client.clone(), tx.clone(), parent_metrics);
 
     let mut child_runtime_config = HashMap::with_capacity(4);
     let mut children = HashMap::with_capacity(4);
@@ -157,20 +157,19 @@ async fn create_operator_state(executor: &mut impl Executor, metrics: Metrics, r
     for (child_type, child_conf) in child_types {
         let child_metrics = metrics.watcher_metrics(&child_type);
         let type_key = child_type.to_type_ref();
-        let child_type = Arc::new(child_type);
         let runtime_conf = ChildRuntimeConfig {
-            child_type: child_type.clone(),
+            child_type: child_type,
             update_strategy: child_conf.update_strategy,
         };
         child_runtime_config.insert(type_key, runtime_conf);
         let child_monitor = informer::start_child_monitor(executor, tracking_label_name.clone(), namespace.clone(),
-                child_type.clone(), client.clone(), tx.clone(), child_metrics);
+                child_type, client.clone(), tx.clone(), child_metrics);
         children.insert(child_type, child_monitor);
     }
     let runtime_config = Arc::new(RuntimeConfig {
         metrics,
         child_types: child_runtime_config,
-        parent_type: parent_type,
+        parent_type: parent,
         correlation_label_name: tracking_label_name,
         controller_label_name: ownership_label_name,
         operator_name,
@@ -209,7 +208,7 @@ impl InProgressUpdate {
 struct OperatorState {
     running: Arc<AtomicBool>,
     parents: ResourceMonitor<UidToIdIndex>,
-    children: HashMap<Arc<K8sType>, ResourceMonitor<LabelToIdIndex>>,
+    children: HashMap<&'static K8sType, ResourceMonitor<LabelToIdIndex>>,
     sender: Sender<ResourceMessage>,
     receiver: Receiver<ResourceMessage>,
     in_progress_updates: HashMap<String, InProgressUpdate>,

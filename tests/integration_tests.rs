@@ -6,6 +6,7 @@ use roperator::serde_json::{json, Value};
 
 use std::time::Duration;
 
+static POD: &K8sType = k8s_types::core::v1::Pod;
 
 fn make_client_config(operator_name: &str) -> ClientConfig {
     if let Some(conf) = ClientConfig::from_service_account(operator_name).ok() {
@@ -15,16 +16,20 @@ fn make_client_config(operator_name: &str) -> ClientConfig {
     }
 }
 
-fn parent_type() -> K8sType {
-    K8sType::new("roperator.com", "v1alpha1", "TestParent", "testparents")
-}
+static PARENT_TYPE: &K8sType = &K8sType {
+    group: "roperator.com",
+    version: "v1alpha1",
+    kind: "TestParent",
+    plural_kind: "testparents",
+};
+
 
 fn setup(name: &str, handler: impl Handler) -> TestKit {
     std::env::set_var("RUST_LOG", "roperator=trace");
     let _ = env_logger::try_init();
-    let operator_config = OperatorConfig::new(name, parent_type())
+    let operator_config = OperatorConfig::new(name, PARENT_TYPE)
             .within_namespace(name)
-            .with_child(K8sType::pod(), ChildConfig::recreate())
+            .with_child(k8s_types::core::v1::Pod, ChildConfig::recreate())
             .expose_health(false)
             .expose_metrics(false);
     let client_config = make_client_config(name);
@@ -34,10 +39,9 @@ fn setup(name: &str, handler: impl Handler) -> TestKit {
 }
 
 fn parent(namespace: &str, name: &str) -> Value {
-    let k8s_type = parent_type();
     json!({
-        "apiVersion": k8s_type.format_api_version(),
-        "kind": k8s_type.kind.as_str(),
+        "apiVersion": PARENT_TYPE.format_api_version(),
+        "kind": PARENT_TYPE.kind,
         "metadata": {
             "namespace": namespace,
             "name": name,
@@ -49,11 +53,10 @@ fn parent(namespace: &str, name: &str) -> Value {
 #[test]
 fn operator_settles_on_a_stable_state() {
     let namespace = "stable-state";
-    let parent_type = parent_type();
     let mut testkit = setup(namespace, success_handler);
 
     let parent = parent(namespace, "parent-one");
-    testkit.create_resource(&parent_type, &parent).expect("failed to create parent resource");
+    testkit.create_resource(PARENT_TYPE, &parent).expect("failed to create parent resource");
 
     testkit.reconcile_and_assert_success(Duration::from_secs(20));
 
@@ -84,7 +87,7 @@ fn operator_settles_on_a_stable_state() {
         }
     });
 
-    testkit.assert_child_resource_eq(&K8sType::pod(), &ObjectIdRef::new(namespace, "parent-one"), expected_pod);
+    testkit.assert_child_resource_eq(POD, &ObjectIdRef::new(namespace, "parent-one"), expected_pod);
 }
 
 

@@ -1,4 +1,5 @@
-use crate::config::{K8sType, ClientConfig, Credentials};
+use crate::config::{ClientConfig, Credentials};
+use crate::k8s_types::K8sType;
 use crate::runner::client::Error;
 use crate::resource::{ObjectIdRef, K8sResource};
 
@@ -174,14 +175,14 @@ fn make_url(client_config: &ClientConfig, k8s_type: &K8sType, namespace: Option<
         };
         segments.push(prefix);
         if !k8s_type.group.is_empty() {
-            segments.push(k8s_type.group.as_str());
+            segments.push(k8s_type.group);
         }
-        segments.push(k8s_type.version.as_str());
+        segments.push(k8s_type.version);
         if let Some(ns) = namespace {
             segments.push("namespaces");
             segments.push(ns);
         }
-        segments.push(k8s_type.plural_kind.as_str());
+        segments.push(k8s_type.plural_kind);
 
         if let Some(n) = name {
             segments.push(n);

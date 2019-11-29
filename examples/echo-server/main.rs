@@ -4,7 +4,7 @@
 use roperator::prelude::{
     run_operator,
     OperatorConfig, ChildConfig,
-    K8sType, K8sResource, Error,
+    k8s_types, K8sType, K8sResource, Error,
     SyncRequest, SyncResponse,
 };
 use roperator::serde_json::{json, Value};
@@ -12,10 +12,13 @@ use roperator::serde_json::{json, Value};
 /// Name of our operator, which is automatically added as a label value in all of the child resources we create
 const OPERATOR_NAME: &str = "echoserver-example";
 
-/// Returns a `K8sType` with basic info about our parent CRD
-pub fn parent_type() -> K8sType {
-    K8sType::new("example.roperator.com", "v1alpha1", "EchoServer", "echoservers")
-}
+/// a `K8sType` with basic info about our parent CRD
+static PARENT_TYPE: &K8sType = &K8sType {
+    group: "example.roperator.com",
+    version: "v1alpha1",
+    kind: "EchoServer",
+    plural_kind: "echoservers",
+};
 
 /// Represents an instance of the CRD that is in the kubernetes cluster.
 /// Note that this struct does not need to implement Serialize because the
@@ -58,9 +61,9 @@ fn main() {
     // For each child type, we'll also specify the `UpdateStrategy`, which determines the behavior after a change is detected
     // between the desired and actual state of a resource of that type. For example, Pods cannot generally be updated in-place,
     // but must be deleted and re-created.
-    let operator_config = OperatorConfig::new(OPERATOR_NAME, parent_type())
-            .with_child(K8sType::pod(), ChildConfig::recreate())
-            .with_child(K8sType::service(), ChildConfig::replace());
+    let operator_config = OperatorConfig::new(OPERATOR_NAME, PARENT_TYPE)
+            .with_child(k8s_types::core::v1::Pod, ChildConfig::recreate())
+            .with_child(k8s_types::core::v1::Service, ChildConfig::replace());
 
     // now we run the operator, passing in our handler function
     let err = run_operator(operator_config, handle_sync);

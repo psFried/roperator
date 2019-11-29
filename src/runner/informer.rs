@@ -1,5 +1,5 @@
 use crate::resource::{K8sResource, ObjectId, ObjectIdRef, InvalidResourceError};
-use crate::config::{K8sType};
+use crate::k8s_types::K8sType;
 use crate::runner::client::{Client, Error as ClientError, WatchEvent, ApiError, ObjectList};
 use crate::runner::metrics::WatcherMetrics;
 
@@ -221,7 +221,7 @@ pub enum EventType {
 #[derive(Clone, PartialEq)]
 pub struct ResourceMessage {
     pub event_type: EventType,
-    pub resource_type: Arc<K8sType>,
+    pub resource_type: &'static K8sType,
     pub resource_id: ObjectId,
     pub index_key: Option<String>,
 }
@@ -345,16 +345,16 @@ impl From<SendError> for MonitorBackendErr {
 }
 
 
-pub fn start_child_monitor(executor: &mut impl Executor, label_name: String, namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<LabelToIdIndex> {
+pub fn start_child_monitor(executor: &mut impl Executor, label_name: String, namespace: Option<String>, k8s_type: &'static K8sType, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<LabelToIdIndex> {
     let index = LabelToIdIndex::new(label_name.clone());
     start_monitor(executor, index, k8s_type, namespace, Some(label_name), client, sender, watcher_metrics)
 }
 
-pub fn start_parent_monitor(executor: &mut impl Executor, namespace: Option<String>, k8s_type: Arc<K8sType>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<UidToIdIndex> {
+pub fn start_parent_monitor(executor: &mut impl Executor, namespace: Option<String>, k8s_type: &'static K8sType, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<UidToIdIndex> {
     start_monitor(executor, UidToIdIndex::new(), k8s_type, namespace, None, client, sender, watcher_metrics)
 }
 
-fn start_monitor<I: ReverseIndex>(executor: &mut impl Executor, index: I, k8s_type: Arc<K8sType>, namespace: Option<String>, label_selector: Option<String>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<I> {
+fn start_monitor<I: ReverseIndex>(executor: &mut impl Executor, index: I, k8s_type: &'static K8sType, namespace: Option<String>, label_selector: Option<String>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<I> {
 
     let cache_and_index = Arc::new(Mutex::new(CacheAndIndex::new(index)));
     let frontend = ResourceMonitor { cache_and_index: cache_and_index.clone() };
@@ -378,7 +378,7 @@ struct ResourceMonitorBackend<I: ReverseIndex> {
     metrics: WatcherMetrics,
     cache_and_index: Arc<Mutex<CacheAndIndex<I>>>,
     client: Client,
-    k8s_type: Arc<K8sType>,
+    k8s_type: &'static K8sType,
     sender: Sender<ResourceMessage>,
     label_selector: Option<String>,
     namespace: Option<String>,
@@ -488,7 +488,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         let resource_version = resource.get_resource_version().to_owned();
 
         let resource_id = resource.get_object_id().into_owned();
-        let resource_type = self.k8s_type.clone();
+        let resource_type = self.k8s_type;
         let mut cache_and_index = self.cache_and_index.lock().await;
         let index_key = cache_and_index.index.get_key(&resource).map(String::from);
 
@@ -530,7 +530,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
             let resource = K8sResource::from_value(object)?;
             let index_key = cache_and_index.index.get_key(&resource).map(String::from);
             let event_type = get_update_event_type(resource.as_ref());
-            let resource_type = self.k8s_type.clone();
+            let resource_type = self.k8s_type;
             let resource_id = resource.get_object_id().into_owned();
             let message = ResourceMessage { event_type, resource_type, resource_id, index_key };
 
