@@ -115,7 +115,7 @@ pub(crate) struct ChildRuntimeConfig {
 #[derive(Debug)]
 pub(crate) struct RuntimeConfig {
     pub metrics: Metrics,
-    pub child_types: HashMap<K8sTypeRef<'static>, ChildRuntimeConfig>,
+    pub child_types: HashMap<&'static K8sType, ChildRuntimeConfig>,
     pub parent_type: &'static K8sType,
     pub correlation_label_name: String,
     pub controller_label_name: String,
@@ -123,8 +123,16 @@ pub(crate) struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    pub(crate) fn type_for<'a, 'b>(&'a self, type_ref: &'b K8sTypeRef<'a>) -> Option<&'a K8sType> {
-        self.child_types.get(type_ref).map(|c| &*c.child_type)
+    pub(crate) fn type_for(&self, type_ref: &K8sTypeRef<'_>) -> Option<&'static K8sType> {
+        self.child_types.values()
+                .find(|conf| type_ref == conf.child_type)
+                .map(|conf| conf.child_type)
+    }
+
+    pub(crate) fn get_child_config<'a>(&'a self, type_ref: &'_ K8sTypeRef<'_>) -> Option<&'a ChildRuntimeConfig> {
+        self.type_for(type_ref).and_then(|child_type| {
+            self.child_types.get(child_type)
+        })
     }
 }
 
@@ -156,12 +164,11 @@ async fn create_operator_state(executor: &mut impl Executor, metrics: Metrics, r
 
     for (child_type, child_conf) in child_types {
         let child_metrics = metrics.watcher_metrics(&child_type);
-        let type_key = child_type.to_type_ref();
         let runtime_conf = ChildRuntimeConfig {
             child_type: child_type,
             update_strategy: child_conf.update_strategy,
         };
-        child_runtime_config.insert(type_key, runtime_conf);
+        child_runtime_config.insert(child_type, runtime_conf);
         let child_monitor = informer::start_child_monitor(executor, tracking_label_name.clone(), namespace.clone(),
                 child_type, client.clone(), tx.clone(), child_metrics);
         children.insert(child_type, child_monitor);

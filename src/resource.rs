@@ -109,11 +109,7 @@ impl K8sResource {
     pub fn get_type_ref(&self) -> K8sTypeRef {
         let api_version = self.api_version();
         let kind = self.kind();
-        K8sTypeRef::new(api_version, kind)
-    }
-
-    pub fn get_resource_ref(&self) -> ResourceRef {
-        ResourceRef::new(self.get_type_ref(), self.get_object_id())
+        K8sTypeRef(api_version, kind)
     }
 
     pub fn generation(&self) -> i64 {
@@ -172,10 +168,10 @@ pub fn object_id(json: &Value) -> Option<ObjectIdRef> {
     })
 }
 
-pub fn type_ref(json: &Value) -> Option<K8sTypeRef> {
+pub fn type_ref<'a>(json: &'a Value) -> Option<K8sTypeRef<'a>> {
     str_value(json, "/apiVersion").and_then(|api_version| {
         str_value(json, "/kind").map(|kind| {
-            K8sTypeRef::new(api_version, kind)
+            K8sTypeRef(api_version, kind)
         })
     })
 }
@@ -218,26 +214,23 @@ impl <'a> std::fmt::Display for PairRef<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct K8sTypeRef<'a>(PairRef<'a>);
+pub struct K8sTypeRef<'a>(pub &'a str, pub &'a str);
 impl <'a> K8sTypeRef<'a> {
-    pub fn into_owned(self) -> K8sTypeRef<'static> {
-        K8sTypeRef(self.0.into_owned())
-    }
 
-    pub fn to_owned(&self) -> K8sTypeRef<'static> {
-        K8sTypeRef(self.0.to_owned())
-    }
-
-    pub fn new(api_version: impl Into<Cow<'a, str>>, kind: impl Into<Cow<'a, str>>) -> Self {
-        K8sTypeRef(PairRef::new(api_version, kind))
+    pub fn new(api_version: &'a str, kind: &'a str) -> Self {
+        K8sTypeRef(api_version, kind)
     }
 
     pub fn as_parts(&self) -> (&str, &str) {
-        self.0.as_parts()
+        (self.0, self.1)
     }
 
-    pub const fn v1_pod() -> K8sTypeRef<'static> {
-        K8sTypeRef(PairRef(Cow::Borrowed("v1"), Cow::Borrowed("Pod")))
+    pub fn api_version(&self) -> &str {
+        self.as_parts().0
+    }
+
+    pub fn kind(&self) -> &str {
+        self.as_parts().1
     }
 }
 
@@ -249,26 +242,7 @@ impl <'a> std::fmt::Display for K8sTypeRef<'a> {
 
 impl <'a> std::cmp::PartialEq<K8sType> for K8sTypeRef<'a> {
     fn eq(&self, rhs: &K8sType) -> bool {
-        let K8sTypeRef(PairRef(ref api_version, ref kind)) = *self;
-
-        let rhs_group_len = rhs.group.len();
-        if kind == rhs.kind && api_version.starts_with(rhs.group) && api_version.ends_with(rhs.version) {
-            if !rhs.group.is_empty()  {
-                // if it has a group, then the apiVersion should be <group>/<version>, so we need to ensure that
-                // the slash is present and nothing else
-                if api_version.len() == (rhs_group_len + rhs.version.len() + 1) {
-                    let expected_slash = &api_version[rhs_group_len..];
-                    return expected_slash.starts_with("/");
-                } else {
-                    return false;
-                }
-            } else {
-                // if the group is NOT specified in rhs, then we check the length of api_version in order to
-                // ensure that it does not contain a '/' at all
-                return api_version.len() == rhs_group_len + rhs.version.len();
-            }
-        }
-        false
+        self.api_version() == rhs.api_version && self.kind() == rhs.kind
     }
 }
 
@@ -314,18 +288,5 @@ pub type ObjectId = ObjectIdRef<'static>;
 impl <'a> std::fmt::Display for ObjectIdRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct ResourceRef<'a>(K8sTypeRef<'a>, ObjectIdRef<'a>);
-
-impl <'a> ResourceRef<'a> {
-    pub fn new(type_ref: K8sTypeRef<'a>, id: ObjectIdRef<'a>) -> Self {
-        ResourceRef(type_ref, id)
-    }
-
-    pub fn into_owned(self) -> ResourceRef<'static> {
-        ResourceRef(self.0.into_owned(), self.1.into_owned())
     }
 }

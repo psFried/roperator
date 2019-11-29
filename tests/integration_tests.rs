@@ -17,8 +17,7 @@ fn make_client_config(operator_name: &str) -> ClientConfig {
 }
 
 static PARENT_TYPE: &K8sType = &K8sType {
-    group: "roperator.com",
-    version: "v1alpha1",
+    api_version: "roperator.com/v1alpha1",
     kind: "TestParent",
     plural_kind: "testparents",
 };
@@ -40,7 +39,7 @@ fn setup(name: &str, handler: impl Handler) -> TestKit {
 
 fn parent(namespace: &str, name: &str) -> Value {
     json!({
-        "apiVersion": PARENT_TYPE.format_api_version(),
+        "apiVersion": PARENT_TYPE.api_version,
         "kind": PARENT_TYPE.kind,
         "metadata": {
             "namespace": namespace,

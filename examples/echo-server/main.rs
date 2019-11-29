@@ -14,8 +14,7 @@ const OPERATOR_NAME: &str = "echoserver-example";
 
 /// a `K8sType` with basic info about our parent CRD
 static PARENT_TYPE: &K8sType = &K8sType {
-    group: "example.roperator.com",
-    version: "v1alpha1",
+    api_version: "example.roperator.com/v1alpha1",
     kind: "EchoServer",
     plural_kind: "echoservers",
 };

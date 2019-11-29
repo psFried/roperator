@@ -1,7 +1,8 @@
 use crate::handler::{SyncRequest, SyncResponse, Handler};
 use crate::runner::client::{self, Client};
 use crate::config::UpdateStrategy;
-use crate::resource::{K8sResource, ObjectId, InvalidResourceError, JsonObject, object_id, type_ref, K8sTypeRef, ObjectIdRef};
+use crate::k8s_types::K8sType;
+use crate::resource::{K8sResource, ObjectId, InvalidResourceError, JsonObject, object_id, type_ref, ObjectIdRef};
 use crate::runner::informer::{ResourceMessage, EventType};
 use crate::runner::{duration_to_millis, RuntimeConfig, ChildRuntimeConfig};
 use crate::runner::reconcile::compare::{compare_values};
@@ -96,9 +97,6 @@ async fn update_children(client: &Client, runtime_config: &RuntimeConfig, req: &
         let child_id = object_id(&child).ok_or_else(|| {
             InvalidResourceError::new("missing name", child.clone())
         })?.into_owned();
-        let child_type = type_ref(&child).ok_or_else(|| {
-            InvalidResourceError::new("missing either apiVersion or kind", child.clone())
-        })?.into_owned();
 
         // ensure that the child has the same namespace as the parent. This is a deliberate constraint that
         // we place on users of this library, as having non-namespaced children of namespaced parents would
@@ -109,17 +107,23 @@ async fn update_children(client: &Client, runtime_config: &RuntimeConfig, req: &
             return Err(InvalidResourceError::new(MESSAGE, child.clone()).into());
         }
 
-        // get the configuration for this child type, and bail if it doesn't exist
-        let child_config = runtime_config.child_types.get(&child_type).ok_or_else(|| {
-            UpdateError::UnknownChildType(child_type.clone())
-        })?;
+        let child_config: &ChildRuntimeConfig = {
+            let child_type_ref = type_ref(&child).ok_or_else(|| {
+                InvalidResourceError::new("missing either apiVersion or kind", child.clone())
+            })?;
+
+            // get the configuration for this child type, and bail if it doesn't exist
+            runtime_config.get_child_config(&child_type_ref).ok_or_else(|| {
+                UpdateError::UnknownChildType(child_type_ref.api_version().to_string(), child_type_ref.kind().to_string())
+            })?
+        };
+        let existing_child = find_existing_child(req, child_config.child_type, &child_id);
+        let update_required = is_child_update_required(&parent_id, child_config, existing_child, &child_id, &child)?;
         add_parent_references(runtime_config, parent_id.name(), parent_uid, &mut child)?;
-        let existing_child = find_existing_child(req, &child_type, &child_id);
-        let update_required = is_child_update_required(&parent_id, child_config, existing_child, &child_type, &child_id, &child)?;
         if let Some(update_type) = update_required {
             let start_time = Instant::now();
             log::debug!("Starting child update for parent_uid: {}, child_type: {}, child_id: {}",
-                parent_uid, child_type, child_id);
+                parent_uid, child_config.child_type, child_id);
             let result = do_child_update(update_type, child_config, client, child).await;
             let total_millis = duration_to_millis(start_time.elapsed());
             log::debug!("Finshed child update for {} in {}ms with result: {:?}", child_id, total_millis, result);
@@ -159,32 +163,31 @@ enum UpdateType {
     Delete,
 }
 
-fn find_existing_child<'a, 'b>(req: &'a SyncRequest, child_type: &'b K8sTypeRef<'_>, child_id: &'b ObjectIdRef<'_>) -> Option<&'a K8sResource> {
-    let (api_version, kind) = child_type.as_parts();
+fn find_existing_child<'a, 'b>(req: &'a SyncRequest, child_type: &K8sType, child_id: &'b ObjectIdRef<'_>) -> Option<&'a K8sResource> {
     let (namespace, name) = child_id.as_parts();
-    req.raw_child(api_version, kind, namespace, name)
+    req.raw_child(child_type.api_version, child_type.kind, namespace, name)
 }
 
-fn is_child_update_required(parent_id: &ObjectIdRef<'_>, child_config: &ChildRuntimeConfig, existing_child: Option<&K8sResource>, child_type: &K8sTypeRef<'_>, child_id: &ObjectIdRef<'_>, child: &Value) -> Result<Option<UpdateType>, UpdateError> {
+fn is_child_update_required(parent_id: &ObjectIdRef<'_>, child_config: &ChildRuntimeConfig, existing_child: Option<&K8sResource>, child_id: &ObjectIdRef<'_>, child: &Value) -> Result<Option<UpdateType>, UpdateError> {
     let update_type = match (existing_child, child_config.update_strategy) {
         (Some(_), UpdateStrategy::OnDelete) => {
             log::debug!("UpdateStrategy for child type {} is OnDelete and child {} already exists, so will not update",
-                    child_type, child_id);
+                    child_config.child_type, child_id);
             None
         }
         (Some(existing_child), update_strategy) => {
             let diffs = compare_values(existing_child.as_ref(), child);
             if diffs.non_empty() {
                 log::info!("Found {} diffs in child of parent: {} with type: {} and id: {}, diffs: {}",
-                        diffs.len(), parent_id, child_type, child_id, diffs);
+                        diffs.len(), parent_id, child_config.child_type, child_id, diffs);
                 determine_update_type(existing_child, update_strategy)
             } else {
-                log::debug!("No difference in child of parent: {}, with type: {} and id: {}", parent_id, child_type, child_id);
+                log::debug!("No difference in child of parent: {}, with type: {} and id: {}", parent_id, child_config.child_type, child_id);
                 None
             }
         }
         (None, _) => {
-            log::debug!("No existing child of parent: {} with type: {} and id: {}", parent_id, child_type, child_id);
+            log::debug!("No existing child of parent: {} with type: {} and id: {}", parent_id, child_config.child_type, child_id);
             Some(UpdateType::Create)
         }
     };
@@ -233,9 +236,9 @@ fn add_parent_references(runtime_config: &RuntimeConfig, parent_name: &str, pare
 
 fn make_owner_ref(parent_uid: &str, parent_name: &str, runtime_config: &RuntimeConfig) -> Value {
     json!({
-        "apiVersion": runtime_config.parent_type.format_api_version(),
+        "apiVersion": runtime_config.parent_type.api_version,
         "controller": true,
-        "kind": runtime_config.parent_type.kind.clone(),
+        "kind": runtime_config.parent_type.kind,
         "name": parent_name,
         "uid": parent_uid,
     })

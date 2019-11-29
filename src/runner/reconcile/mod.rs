@@ -5,7 +5,7 @@ mod finalize;
 use crate::runner::client::{self, Client};
 use crate::runner::RuntimeConfig;
 use crate::runner::informer::ResourceMessage;
-use crate::resource::{InvalidResourceError, K8sTypeRef, ObjectIdRef};
+use crate::resource::{InvalidResourceError, ObjectIdRef};
 use crate::handler::{SyncRequest, Handler};
 
 use tokio::sync::mpsc::Sender;
@@ -47,7 +47,7 @@ impl SyncHandler {
 pub enum UpdateError {
     Client(client::Error),
     InvalidHandlerResponse(InvalidResourceError),
-    UnknownChildType(K8sTypeRef<'static>),
+    UnknownChildType(String, String),
     HandlerError(crate::handler::Error),
 }
 
@@ -56,7 +56,7 @@ impl Display for UpdateError {
         match self {
             UpdateError::Client(e) => write!(f, "Client Error: {}", e),
             UpdateError::InvalidHandlerResponse(e) => write!(f, "Invalid response from Handler: {}", e),
-            UpdateError::UnknownChildType(child_type) => write!(f, "No configuration exists for child with type: {}", child_type),
+            UpdateError::UnknownChildType(api_version, kind) => write!(f, "No configuration exists for child with api_version: {}, kind: {}", api_version, kind),
             UpdateError::HandlerError(err) => write!(f, "Handler error: {}", err),
         }
     }
@@ -104,8 +104,8 @@ pub(crate) async fn update_status_if_different(parent_id: &ObjectIdRef<'_>, pare
         obj.insert("namespace".to_owned(), Value::String(ns.to_owned()));
     }
     let new_status = serde_json::json!({
-        "apiVersion": runtime_config.parent_type.format_api_version(),
-        "kind": runtime_config.parent_type.kind.clone(),
+        "apiVersion": runtime_config.parent_type.api_version,
+        "kind": runtime_config.parent_type.kind,
         "metadata": metadata,
         "status": new_status,
     });

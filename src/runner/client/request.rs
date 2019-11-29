@@ -167,17 +167,18 @@ fn make_url(client_config: &ClientConfig, k8s_type: &K8sType, namespace: Option<
     let mut url = url::Url::parse(client_config.api_server_endpoint.as_str()).unwrap();
     {
         let mut segments = url.path_segments_mut().unwrap();
+        let group = k8s_type.group();
 
-        let prefix = if k8s_type.group.len() > 0 {
+        let prefix = if group.len() > 0 {
             "apis"
         } else {
             "api"
         };
         segments.push(prefix);
-        if !k8s_type.group.is_empty() {
-            segments.push(k8s_type.group);
+        if !group.is_empty() {
+            segments.push(group);
         }
-        segments.push(k8s_type.version);
+        segments.push(k8s_type.version());
         if let Some(ns) = namespace {
             segments.push("namespaces");
             segments.push(ns);

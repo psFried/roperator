@@ -1,6 +1,7 @@
 use crate::resource::K8sTypeRef;
 
 use std::fmt::{self, Display};
+use std::hash::{self, Hash};
 
 /// A basic description of a Kubernetes resource, with just enough information to allow Roperator
 /// to communicate with the api server. We use `&'static str` for all of these so that it's easy
@@ -10,62 +11,92 @@ use std::fmt::{self, Display};
 /// ```no_run
 /// use roperator::k8s_types::K8sType;
 ///
-/// pub static MYCrd: &K8sType = &K8sType {
-///     group: "example.com",
-///     version: "v1",
+/// #[allow(non_upper_case_globals)]
+/// pub static MyCrd: &K8sType = &K8sType {
+///     api_version: "example.com/v1",
 ///     kind: "MyCrd",
 ///     plural_kind: "mycrds"
 /// };
 /// ```
 ///
 /// If for some reason you need to create `K8sType`s at runtime, then you can use a string internment library
-/// or else you can use `Box::leak` to create static strings at runtime by leaking a `String`. Of course you should
-/// only use that second method cautiously when you know that you won't be repeatedly creating new K8sTypes.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// like `string_cache` or else you can use the `define_type` function.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct K8sType {
-    pub group: &'static str,
-    pub version: &'static str,
+    pub api_version: &'static str,
     pub kind: &'static str,
     pub plural_kind: &'static str,
 }
 
+impl Hash for K8sType {
+    fn hash<H: hash::Hasher>(&self, hasher: &mut H) {
+        self.api_version.hash(hasher);
+        self.kind.hash(hasher);
+    }
+}
+
+
+/// Creates a `&'static K8sType` at runtime **by leaking memory**. This is totally fine, as long as it's only
+/// done once on application startup, but you definitely want to avoid repeated calls to define the same type.
+pub fn define_type(api_version: String, kind: String, plural_kind: String) -> &'static K8sType {
+    fn leak_str(s: String) -> &'static str {
+        Box::leak(s.into_boxed_str())
+    }
+
+    let k8s_type = K8sType {
+        api_version: leak_str(api_version),
+        kind: leak_str(kind),
+        plural_kind: leak_str(plural_kind),
+    };
+    log::info!("Dynamically defining {:?}", k8s_type);
+    Box::leak(Box::new(k8s_type))
+}
+
 impl K8sType {
 
-    pub fn to_type_ref(&self) -> K8sTypeRef<'static> {
-        K8sTypeRef::new(self.format_api_version(), self.kind)
-    }
-
-    pub fn format_api_version(&self) -> String {
-        if self.group.is_empty() {
-            self.version.to_string()
-        } else {
-            format!("{}/{}", self.group, self.version)
+    pub fn as_group_and_version(&self) -> (&str, &str) {
+        // TODO: validate the apiVersion string and panic with a helpful message if it's wrong
+        match self.api_version.find('/') {
+            Some(slash_idx) => {
+                (&self.api_version[..slash_idx], &self.api_version[(slash_idx + 1)..])
+            }
+            None => {
+                ("", self.api_version)
+            }
         }
     }
+
+    pub fn group(&self) -> &str {
+        self.as_group_and_version().0
+    }
+
+    pub fn version(&self) -> &str {
+        self.as_group_and_version().1
+    }
+
+    pub fn to_type_ref(&self) -> K8sTypeRef<'static> {
+        K8sTypeRef(self.api_version, self.kind)
+    }
+
 }
 
 impl Display for K8sType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.group.is_empty() {
-            write!(f, "{}/{}", self.version, self.plural_kind)
-        } else {
-            write!(f, "{}/{}/{}", self.group, self.version, self.plural_kind)
-        }
+        write!(f, "{}/{}", self.api_version, self.plural_kind)
     }
 }
 
 macro_rules! k8s_type {
-    ($ref_name:ident, $group:expr, $version:expr, $kind:expr, $plural_kind:expr) => {
+    ($ref_name:ident, $api_version:expr, $kind:expr, $plural_kind:expr) => {
         #[allow(non_upper_case_globals)]
         pub static $ref_name: &crate::k8s_types::K8sType = &crate::k8s_types::K8sType {
-            group: $group,
-            version: $version,
+            api_version: $api_version,
             kind: $kind,
             plural_kind: $plural_kind,
         };
     };
     ($ref_name:ident, core, v1, $kind:expr, $plural_kind:expr) => {
-        k8s_type!($ref_name, "", "v1", $kind, $plural_kind)
+        k8s_type!($ref_name, "v1", $kind, $plural_kind)
     };
 }
 
@@ -79,7 +110,7 @@ macro_rules! def_types {
             pub mod $version {
 
                 $(
-                    k8s_type!($kind, $group, stringify!($version), stringify!($kind), stringify!($plural_kind));
+                    k8s_type!($kind, concat!($group, "/", stringify!($version)), stringify!($kind), stringify!($plural_kind));
                 )*
             }
 
@@ -93,9 +124,17 @@ macro_rules! def_types {
         }
 
     };
-    (@core => $rem:tt ) => {
+    (@core => [
+        $( $version:ident => [
+            $( $kind:ident ~ $plural_kind:ident ),*
+        ]),*
+    ]) => {
         pub mod core {
-            def_types!{@nogroupmod, "", $rem }
+            $(pub mod $version {
+                $(
+                    k8s_type!($kind, stringify!($version), stringify!($kind), stringify!($plural_kind));
+                )*
+            })*
         }
     }
 }
@@ -297,3 +336,24 @@ pub mod storage_k8s_io {
         ]
     }
 }
+
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn k8s_type_returns_group_and_api_version_when_both_are_present() {
+        let subject = storage_k8s_io::v1::CSIDriver;
+        assert_eq!("storage.k8s.io", subject.group());
+        assert_eq!("v1", subject.version());
+    }
+
+    #[test]
+    fn k8s_type_returns_empty_str_for_group_when_no_group_is_present() {
+        let subject = core::v1::Pod;
+        assert_eq!("", subject.group());
+        assert_eq!("v1", subject.version());
+    }
+}
+
