@@ -91,7 +91,7 @@ impl TestKit {
         let ns_type = crate::k8s_types::core::v1::Namespace;
         let namespace_id = ObjectIdRef::new("", ns.as_str());
 
-        if testkit.get_resource(&ns_type, &namespace_id)?.is_none() {
+        if testkit.get_resource_from_api_server(&ns_type, &namespace_id)?.is_none() {
             let namespace_json = serde_json::json!({
                 "apiVersion": "v1",
                 "kind": "Namespace",
@@ -156,7 +156,7 @@ impl TestKit {
     pub fn assert_resource_deleted_eventually(&mut self, k8s_type: &K8sType, id: &ObjectIdRef<'_>, timeout: Duration) {
         let start_time = Instant::now();
 
-        let mut result = self.get_resource(k8s_type, id).expect("Failed to get child resource");
+        let mut result = self.get_resource_from_api_server(k8s_type, id).expect("Failed to get child resource");
         while result.is_some() {
             if start_time.elapsed() > timeout {
                 panic!("Timed out waiting for child resource deletion to be observed, resouce: {:#}", result.as_ref().unwrap());
@@ -165,9 +165,9 @@ impl TestKit {
                 // list if needed
                 let remaining = timeout.checked_sub(start_time.elapsed())
                         .expect("Timed out waiting for child resource deletion to be observed");
-                self.reconcile_and_assert_success(remaining.min(Duration::from_millis(50)));
+                self.reconcile_and_assert_success(remaining.min(Duration::from_millis(250)));
 
-                result = self.get_resource(k8s_type, id).expect("Failed to get child resource");
+                result = self.get_resource_from_api_server(k8s_type, id).expect("Failed to get child resource");
             }
         }
         // if we break from the loop then the result must be None
@@ -176,7 +176,7 @@ impl TestKit {
     pub fn assert_resource_exists_eventually(&mut self, k8s_type: &K8sType, id: &ObjectIdRef<'_>, timeout: Duration) {
         let start_time = Instant::now();
 
-        let mut result = self.get_resource(k8s_type, id).expect("Failed to get child resource");
+        let mut result = self.get_resource_from_api_server(k8s_type, id).expect("Failed to get child resource");
         while result.is_none() {
             if start_time.elapsed() > timeout {
                 panic!("Timed out waiting for child resource exist, type: {}, id: {}", k8s_type, id);
@@ -187,7 +187,7 @@ impl TestKit {
                         .expect("Timed out waiting for child resource deletion to be observed");
                 self.reconcile_and_assert_success(remaining.min(Duration::from_millis(250)));
 
-                result = self.get_resource(k8s_type, id).expect("Failed to get child resource");
+                result = self.get_resource_from_api_server(k8s_type, id).expect("Failed to get child resource");
             }
         }
         // result must be some
@@ -226,13 +226,13 @@ impl TestKit {
                         break;
                     },
                     Ok(Some(d)) => {
-                        let result = do_reconciliation_run(state, parents_needing_sync, handler, instrumented_handler, Duration::from_millis(50)).await;
+                        let result = do_reconciliation_run(state, parents_needing_sync, handler, instrumented_handler, Duration::from_millis(250).min(timeout)).await;
                         instrumented_handler.reset();
                         diff = Some(d);
                         err = result.err();
                     }
                     Err(e) => {
-                        let result = do_reconciliation_run(state, parents_needing_sync, handler, instrumented_handler, Duration::from_millis(50)).await;
+                        let result = do_reconciliation_run(state, parents_needing_sync, handler, instrumented_handler, Duration::from_millis(250).min(timeout)).await;
                         instrumented_handler.reset();
                         diff = None;
                         err = result.err().or(Some(e));
@@ -262,10 +262,9 @@ impl TestKit {
         }
     }
 
-    pub fn get_resource(&mut self, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<Option<Value>, Error> {
+    pub fn get_resource_from_api_server(&mut self, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<Option<Value>, Error> {
         let TestKit {ref client, ref mut runtime, ..} = *self;
         let maybe_resource = runtime.block_on(async {
-            // TODO: should we just get resources from the cache instead? Or maybe have two separate methods?
             client.get_resource(k8s_type, id).await
         })?;
         Ok(maybe_resource)
@@ -409,11 +408,6 @@ impl InstrumentedHandler {
         } else {
             Err(HandlerErrors(records))
         }
-    }
-
-    fn clone_records(&self) -> HashMap<ObjectId, SyncRecord> {
-        let lock = self.records.write().unwrap();
-        lock.clone()
     }
 
     fn take_records(&self) -> HashMap<ObjectId, SyncRecord> {
@@ -581,7 +575,9 @@ async fn get_object(state: &OperatorState, k8s_type: &K8sType, id: &ObjectIdRef<
         let parents = state.parents.lock_state().await?;
         parents.get_by_id(id)
     } else {
-        let children = state.children.get(k8s_type).expect("no configuration exists for the given K8sType");
+        let children = state.children.get(k8s_type).unwrap_or_else(|| {
+            panic!("No configuration exists for the resource type: {}", k8s_type);
+        });
         let lock = children.lock_state().await?;
         lock.get_by_id(id)
     };
