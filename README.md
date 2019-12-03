@@ -23,60 +23,71 @@ roperator = "*"
 roperator = { version = "*", features = ["testkit"] }
 ```
 
-Then, in your `fn main()`:
+### OperatorConfiguration
+
+
+The first thing you'll need is a configuration object that specifies the relationships between the CRD that will act as the _parent_ and the types of resources that may be created as _children_.
 
 ```rust
-use roperator::prelude::*;
-use roperator::serde_json::json;
-
+use roperator::prelude::{k8s_types, K8sType, OperatorConfiguration, ChildConfig, run_operator};
+/// The type of our parent Custom Resource. This must match the fields provided in the CRD
+pub static PARENT_TYPE: &K8sType = &K8sType {
+    api_version: "example.com/v1alpha1",
+    kind: "MyResource",
+    plural_kind: "myresources",
+};
 
 fn main() {
-    // We'll create a configuration object that tells roperator about the type of your parent CRD, and about the types
-    // of all the child resources we might create. For each child type, we also specify the behavior for when there's a
-    // difference between the desired and actual state for a child of that type.
-    let parent_type = K8sType::new("example.roperator.com", "v1alpha1", "MyCrdKind", "mycrdkinds");
-    let operator_config = OperatorConfig::new("my-operator", parent_type)
-            .with_child(K8sType::pod(), ChildConfig::recreate()) // recreate means to first delete the resource, then create a new one
-            .with_child(K8sType::service(), ChildConfig::replace()); // replace means to use a PUT request to update the resource in place
+    let operator_config = OperatorConfig::new("my-operator-name", PARENT_TYPE)
+            .with_child(k8s_types::core::v1::Pod, ChildConfig::recreate())
+            .with_child(k8s_types::core::v1::Service, ChildConfig::replace());
+    //.... you can have as many child types as you want, but you need to specify all of the types that you may create ahead of time
 
-    // next we create a Handler that holds a function for determining the current status for the parent resource, as well as
-    // a function for returning the desired child resources
-    let handler = HandlerImpl::default()
-            .determine_children(|req: &SyncRequest| {
-                // This function should return the desired children based on the given parent in the request.
-                // We could also return any types from the `k8s_openapi` crate (e.g. Pod or Service structs), but writing json directly is fine, too
-                Ok(json!([
-                    {
-                        "apiVersion": "v1",
-                        "kind": "Service",
-                        "metadata": {
-                            "name": req.parent.name(),
-                            "namespace": req.parent.namespace(),
-                        },
-                        "spec": {
-                            "type": "ExternalName",
-                            "externalName": "some.other.host.test",
-                        }
-                    }
-                ]))
-            })
-            .determine_status(|req: &SyncRequest| {
-                // This function just returns a json object that will be set as the status of the parent resource.
-                // Normally, you'd want to determine this status by looking at the current state of your child resources.
-                let message = if req.has_child("v1", "Service", req.parent.namespace(), req.parent.name()) {
-                    "Everything looks just great"
-                } else {
-                    "Creating a Service, hold your horses"
-                };
-                Ok(json!({
-                    "message": message
-                }))
-            });
+    let my_handler = MyHandler; // we'll look at Handlers further down
 
-    // finally, we run the operator, passing it the configuration and the handler. This function
-    // will block the current thread indefinitely, unless there's a fatal error.
-    let err = run_operator(operator_config, handler);
-    eprintln!("Err running operator: {}", err);
+    run_operator(operator_config, my_handler).expect("failed to run operator");
 }
 ```
 
+### Handler
+
+The main logic of your operator is inside your `Handler` implementation. The main function you need to implement is `Handler::sync`, which accepts a `SyncRequest` and returns a `SyncResponse`. The `Hander` trait is implemented automatically for all `Fn(&SyncRequest) -> Result<SyncResponse, Error>`, but you can also implement it for your own type.
+
+```rust
+use roperator::prelude::{Handler, SyncRequest, SyncResponse, FinalizeResponse, Error};
+
+struct MyHandler;
+impl Handler for MyHandler {
+    fn sync(&self, request: &SyncRequest) -> Result<SyncResponse, Error> {
+        // some json object that describes the status of the parent. Typically, this will be determined just based on the
+        // statuses of the child resources
+        let parent_status = determine_parent_status(request);
+
+        // returns all of the desired kubernetes resources that should correspond to this parent
+        let children = determine_desired_child_resources(request);
+        Ok(SyncResponse {
+            status: parent_status,
+            children
+        })
+    }
+}
+```
+
+Handlers may optionally implement the `finalize` function. This function gets called when then parent resource is being deleted, and allows you to clean up any external resources that may have been created. Roperator does its best to ensure that `finalize` will get invoked _at least_ once per parent that is being deleted. It is not possible to guarantee that this will happen, though, since Kuberntes allows clients to force the deletion of resources without waiting for finalizers.
+
+```rust
+
+fn finalize(&self, request: &SyncRequest) -> Result<FinalizeResponse, Error> {
+    // We return a boolean that says whether the finalization was successful or not. If we return false,
+    // then roperator will continue to regularly re-try your finalize function until it succeeds.
+    // As soon as we return `true`, roperator will remove itself from the finalizers list of your parent
+    // resource and allow the deletion to proceed.
+    let cleanup_succeeded: bool = do_cleanup(request);
+    let parent_status = determine_parent_status(request);
+
+    Ok(FinalizeResponse {
+        status: parent_status,
+        finalized: cleanup_succeeded,
+    })
+}
+```
