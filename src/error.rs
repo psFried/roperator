@@ -6,7 +6,10 @@ use std::any::Any;
 pub trait RoperatorError: std::error::Error + Send + 'static + Any {
     fn as_any(&self) -> &dyn Any;
 }
-impl <T> RoperatorError for T where T: std::error::Error + Send + 'static + Any {
+impl<T> RoperatorError for T
+where
+    T: std::error::Error + Send + 'static + Any,
+{
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -15,9 +18,8 @@ impl <T> RoperatorError for T where T: std::error::Error + Send + 'static + Any 
 pub type Error = Box<dyn RoperatorError>;
 
 impl dyn RoperatorError {
-
     /// convenience function for downcasting the error to a concrete type
-    pub fn as_type<T: RoperatorError>(&self) -> Option<&T>  {
+    pub fn as_type<T: RoperatorError>(&self) -> Option<&T> {
         let as_any = self.as_any();
         as_any.downcast_ref::<T>()
     }
@@ -29,14 +31,13 @@ impl dyn RoperatorError {
         let as_any = self.as_any();
         as_any.is::<T>()
     }
-
 }
 
-
-impl <T> From<T> for Error where T: RoperatorError {
+impl<T> From<T> for Error
+where
+    T: RoperatorError,
+{
     fn from(e: T) -> Error {
         Box::new(e)
     }
 }
-
-

@@ -2,20 +2,29 @@ use crate::runner::RuntimeConfig;
 
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Request, Response, Body, Method};
+use hyper::{Body, Method, Request, Response};
 use tokio::runtime::TaskExecutor;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-pub(crate) async fn start(executor: TaskExecutor, port: u16, runtime_config: Arc<RuntimeConfig>, serve_metrics: bool, serve_health: bool) {
-
+pub(crate) async fn start(
+    executor: TaskExecutor,
+    port: u16,
+    runtime_config: Arc<RuntimeConfig>,
+    serve_metrics: bool,
+    serve_health: bool,
+) {
     let address: SocketAddr = ([0u8; 4], port).into();
-    log::info!("Starting server on address: {}, exposing '/metrics': {}, '/health': {}", address, serve_metrics, serve_health);
+    log::info!(
+        "Starting server on address: {}, exposing '/metrics': {}, '/health': {}",
+        address,
+        serve_metrics,
+        serve_health
+    );
 
     let svc = Svc::new(runtime_config.clone(), serve_metrics, serve_health);
-    let service = make_service_fn( move |_| {
-
+    let service = make_service_fn(move |_| {
         let service = svc.clone();
         async move {
             let service = service;
@@ -24,11 +33,14 @@ pub(crate) async fn start(executor: TaskExecutor, port: u16, runtime_config: Arc
             }))
         }
     });
-    if let Err(err) = Server::bind(&address).executor(executor).serve(service).await {
+    if let Err(err) = Server::bind(&address)
+        .executor(executor)
+        .serve(service)
+        .await
+    {
         log::error!("Server failed with error: {:?}", err);
     }
 }
-
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -40,9 +52,12 @@ struct Svc {
 }
 
 impl Svc {
-
     fn new(runtime_config: Arc<RuntimeConfig>, serve_metrics: bool, serve_health: bool) -> Svc {
-        Svc {runtime_config, serve_metrics, serve_health }
+        Svc {
+            runtime_config,
+            serve_metrics,
+            serve_health,
+        }
     }
 
     fn not_found(&self, _request: &Request<Body>) -> Result<Response<Body>, Error> {
@@ -56,9 +71,10 @@ impl Svc {
     }
     fn metrics(&self, _request: &Request<Body>) -> Result<Response<Body>, Error> {
         let body = self.runtime_config.metrics.encode_as_text()?;
-        let resp = Response::builder().status(200)
-                .header(http::header::CONTENT_TYPE, prometheus::TEXT_FORMAT)
-                .body(Body::from(body))?;
+        let resp = Response::builder()
+            .status(200)
+            .header(http::header::CONTENT_TYPE, prometheus::TEXT_FORMAT)
+            .body(Body::from(body))?;
         Ok(resp)
     }
 
@@ -69,22 +85,26 @@ impl Svc {
         log::debug!("Got http request {} {}", req_method, request.uri());
 
         let result = match (req_method, req_path) {
-            (&Method::GET, "/health") if self.serve_health => {
-                self.health(&request)
-            }
-            (&Method::GET, "/metrics") if self.serve_metrics => {
-                self.metrics(&request)
-            }
-            _ => {
-                self.not_found(&request)
-            }
+            (&Method::GET, "/health") if self.serve_health => self.health(&request),
+            (&Method::GET, "/metrics") if self.serve_metrics => self.metrics(&request),
+            _ => self.not_found(&request),
         };
         match result.as_ref() {
             Ok(ref resp) => {
-                log::debug!("Finished handling {} {} with response status: {}", req_method, request.uri(), resp.status());
+                log::debug!(
+                    "Finished handling {} {} with response status: {}",
+                    req_method,
+                    request.uri(),
+                    resp.status()
+                );
             }
             Err(ref err) => {
-                log::error!("Error handling {} {} , error: {:?}", req_method, request.uri(), err);
+                log::error!(
+                    "Error handling {} {} , error: {:?}",
+                    req_method,
+                    request.uri(),
+                    err
+                );
             }
         }
         result

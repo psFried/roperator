@@ -21,7 +21,11 @@ impl InvalidResourceError {
 
 impl Debug for InvalidResourceError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "InvalidResourceError('{}', {})", self.message, self.value)
+        write!(
+            f,
+            "InvalidResourceError('{}', {})",
+            self.message, self.value
+        )
     }
 }
 
@@ -31,8 +35,7 @@ impl fmt::Display for InvalidResourceError {
     }
 }
 
-impl std::error::Error for InvalidResourceError { }
-
+impl std::error::Error for InvalidResourceError {}
 
 #[derive(PartialEq, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -51,7 +54,6 @@ impl std::fmt::Display for K8sResource {
 }
 
 impl K8sResource {
-
     pub fn from_value(value: Value) -> Result<K8sResource, InvalidResourceError> {
         if let Err(msg) = K8sResource::validate(&value) {
             Err(InvalidResourceError {
@@ -113,7 +115,10 @@ impl K8sResource {
     }
 
     pub fn generation(&self) -> i64 {
-        self.0.pointer("/metadata/generation").and_then(Value::as_i64).unwrap_or(-1)
+        self.0
+            .pointer("/metadata/generation")
+            .and_then(Value::as_i64)
+            .unwrap_or(-1)
     }
 
     pub fn is_deletion_timestamp_set(&self) -> bool {
@@ -121,9 +126,15 @@ impl K8sResource {
     }
 
     fn validate(value: &Value) -> Result<(), &'static str> {
-        value.pointer("/metadata/resourceVersion").ok_or("missing metadata.resourceVersion")?;
-        value.pointer("/metadata/name").ok_or("missing metadata.name")?;
-        value.pointer("/metadata/uid").ok_or("missing metadata.uid")?;
+        value
+            .pointer("/metadata/resourceVersion")
+            .ok_or("missing metadata.resourceVersion")?;
+        value
+            .pointer("/metadata/name")
+            .ok_or("missing metadata.name")?;
+        value
+            .pointer("/metadata/uid")
+            .ok_or("missing metadata.uid")?;
         value.pointer("/apiVersion").ok_or("missing apiVersion")?;
         value.pointer("/kind").ok_or("missing kind")?;
         Ok(())
@@ -160,20 +171,14 @@ impl Into<Value> for K8sResource {
     }
 }
 
-
 pub fn object_id(json: &Value) -> Option<ObjectIdRef> {
     let namespace = str_value(json, "/metadata/namespace").unwrap_or("");
-    str_value(json, "/metadata/name").map(|name| {
-        ObjectIdRef::new(namespace, name)
-    })
+    str_value(json, "/metadata/name").map(|name| ObjectIdRef::new(namespace, name))
 }
 
 pub fn type_ref<'a>(json: &'a Value) -> Option<K8sTypeRef<'a>> {
-    str_value(json, "/apiVersion").and_then(|api_version| {
-        str_value(json, "/kind").map(|kind| {
-            K8sTypeRef(api_version, kind)
-        })
-    })
+    str_value(json, "/apiVersion")
+        .and_then(|api_version| str_value(json, "/kind").map(|kind| K8sTypeRef(api_version, kind)))
 }
 
 pub fn str_value<'a, 'b>(json: &'a Value, pointer: &'b str) -> Option<&'a str> {
@@ -183,7 +188,7 @@ pub fn str_value<'a, 'b>(json: &'a Value, pointer: &'b str) -> Option<&'a str> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PairRef<'a>(Cow<'a, str>, Cow<'a, str>);
 
-impl <'a> PairRef<'a> {
+impl<'a> PairRef<'a> {
     pub fn into_owned(self) -> PairRef<'static> {
         let PairRef(a, b) = self;
         let a: Cow<'static, str> = Cow::Owned(a.into_owned());
@@ -207,7 +212,7 @@ impl <'a> PairRef<'a> {
     }
 }
 
-impl <'a> std::fmt::Display for PairRef<'a> {
+impl<'a> std::fmt::Display for PairRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}/{}", self.0, self.1)
     }
@@ -215,8 +220,7 @@ impl <'a> std::fmt::Display for PairRef<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct K8sTypeRef<'a>(pub &'a str, pub &'a str);
-impl <'a> K8sTypeRef<'a> {
-
+impl<'a> K8sTypeRef<'a> {
     pub fn new(api_version: &'a str, kind: &'a str) -> Self {
         K8sTypeRef(api_version, kind)
     }
@@ -234,13 +238,13 @@ impl <'a> K8sTypeRef<'a> {
     }
 }
 
-impl <'a> std::fmt::Display for K8sTypeRef<'a> {
+impl<'a> std::fmt::Display for K8sTypeRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl <'a> std::cmp::PartialEq<K8sType> for K8sTypeRef<'a> {
+impl<'a> std::cmp::PartialEq<K8sType> for K8sTypeRef<'a> {
     fn eq(&self, rhs: &K8sType) -> bool {
         self.api_version() == rhs.api_version && self.kind() == rhs.kind
     }
@@ -248,7 +252,7 @@ impl <'a> std::cmp::PartialEq<K8sType> for K8sTypeRef<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ObjectIdRef<'a>(PairRef<'a>);
-impl <'a> ObjectIdRef<'a> {
+impl<'a> ObjectIdRef<'a> {
     pub fn into_owned(self) -> ObjectId {
         ObjectIdRef(self.0.into_owned())
     }
@@ -280,12 +284,11 @@ impl <'a> ObjectIdRef<'a> {
             Some((self.0).0.as_ref())
         }
     }
-
 }
 
 pub type ObjectId = ObjectIdRef<'static>;
 
-impl <'a> std::fmt::Display for ObjectIdRef<'a> {
+impl<'a> std::fmt::Display for ObjectIdRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }

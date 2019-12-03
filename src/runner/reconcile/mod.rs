@@ -1,20 +1,19 @@
 pub(crate) mod compare;
-mod sync;
 mod finalize;
+mod sync;
 
 use crate::error::Error;
+use crate::handler::{Handler, SyncRequest};
+use crate::resource::{InvalidResourceError, K8sResource, ObjectIdRef};
 use crate::runner::client::{self, Client};
-use crate::runner::RuntimeConfig;
 use crate::runner::informer::ResourceMessage;
-use crate::resource::{InvalidResourceError, ObjectIdRef, K8sResource};
-use crate::handler::{SyncRequest, Handler};
+use crate::runner::RuntimeConfig;
 
-use tokio::sync::mpsc::Sender;
 use serde_json::Value;
+use tokio::sync::mpsc::Sender;
 
-use std::sync::Arc;
 use std::fmt::{self, Display};
-
+use std::sync::Arc;
 
 pub(crate) struct SyncHandler {
     pub sender: Sender<ResourceMessage>,
@@ -26,9 +25,10 @@ pub(crate) struct SyncHandler {
 }
 
 impl SyncHandler {
-
     pub fn start_sync(self) {
-        self.runtime_config.metrics.parent_sync_started(&self.request.parent.get_object_id());
+        self.runtime_config
+            .metrics
+            .parent_sync_started(&self.request.parent.get_object_id());
         tokio::spawn(async move {
             if self.should_finalize() {
                 self::finalize::handle_finalize(self).await;
@@ -41,7 +41,6 @@ impl SyncHandler {
     fn should_finalize(&self) -> bool {
         self.request.parent.is_deletion_timestamp_set()
     }
-
 }
 
 #[derive(Debug)]
@@ -56,8 +55,14 @@ impl Display for UpdateError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             UpdateError::Client(e) => write!(f, "Client Error: {}", e),
-            UpdateError::InvalidHandlerResponse(e) => write!(f, "Invalid response from Handler: {}", e),
-            UpdateError::UnknownChildType(api_version, kind) => write!(f, "No configuration exists for child with api_version: {}, kind: {}", api_version, kind),
+            UpdateError::InvalidHandlerResponse(e) => {
+                write!(f, "Invalid response from Handler: {}", e)
+            }
+            UpdateError::UnknownChildType(api_version, kind) => write!(
+                f,
+                "No configuration exists for child with api_version: {}, kind: {}",
+                api_version, kind
+            ),
             UpdateError::HandlerError(err) => write!(f, "Handler error: {}", err),
         }
     }
@@ -75,7 +80,12 @@ impl From<InvalidResourceError> for UpdateError {
     }
 }
 
-pub(crate) async fn update_status_if_different(existing_parent: &K8sResource, client: &Client, runtime_config: &RuntimeConfig, mut new_status: Value) -> Result<(), UpdateError> {
+pub(crate) async fn update_status_if_different(
+    existing_parent: &K8sResource,
+    client: &Client,
+    runtime_config: &RuntimeConfig,
+    mut new_status: Value,
+) -> Result<(), UpdateError> {
     let parent_id = existing_parent.get_object_id();
     let old_status = existing_parent.status();
     let parent_resource_version = existing_parent.get_resource_version();
@@ -88,9 +98,16 @@ pub(crate) async fn update_status_if_different(existing_parent: &K8sResource, cl
         let diffs = compare::compare_values(old, &new_status);
         let update_required = diffs.non_empty();
         if update_required {
-            log::info!("Found diffs in existing vs desired status for parent: {}: {}", parent_id, diffs);
+            log::info!(
+                "Found diffs in existing vs desired status for parent: {}: {}",
+                parent_id,
+                diffs
+            );
         } else {
-            log::debug!("Current and desired status are the same for parent: {}", parent_id);
+            log::debug!(
+                "Current and desired status are the same for parent: {}",
+                parent_id
+            );
         }
         update_required
     } else {
@@ -113,15 +130,22 @@ pub(crate) async fn update_status_if_different(existing_parent: &K8sResource, cl
         "status": new_status,
     });
     if should_update {
-        client.update_status(&*runtime_config.parent_type, &parent_id, &new_status).await?;
+        client
+            .update_status(&*runtime_config.parent_type, &parent_id, &new_status)
+            .await?;
     }
     Ok(())
 }
 
 fn does_finalizer_exist(resource: &Value, runtime_config: &RuntimeConfig) -> bool {
     let finalizer_name = runtime_config.operator_name.as_str();
-    resource.pointer("/metadata/finalizers")
-            .and_then(Value::as_array)
-            .map(|array| array.iter().any(|name| name.as_str() == Some(finalizer_name)))
-            .unwrap_or(false)
+    resource
+        .pointer("/metadata/finalizers")
+        .and_then(Value::as_array)
+        .map(|array| {
+            array
+                .iter()
+                .any(|name| name.as_str() == Some(finalizer_name))
+        })
+        .unwrap_or(false)
 }

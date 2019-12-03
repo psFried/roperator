@@ -3,8 +3,8 @@ mod kubeconfig;
 use crate::k8s_types::K8sType;
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::io;
+use std::path::Path;
 
 pub const DEFAULT_TRACKING_LABEL_NAME: &str = "app.kubernetes.io/instance";
 pub const DEFAULT_OWNERSHIP_LABEL_NAME: &str = "app.kubernetes.io/managed-by";
@@ -12,7 +12,6 @@ pub const DEFAULT_OWNERSHIP_LABEL_NAME: &str = "app.kubernetes.io/managed-by";
 const SERVICE_ACCOUNT_TOKEN_PATH: &str = "/var/run/secrets/kubernetes.io/serviceaccount/token";
 const SERVICE_ACCOUNT_CA_PATH: &str = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt";
 const API_SERVER_HOSTNAME: &str = "kubernetes.default.svc";
-
 
 pub use self::kubeconfig::KubeConfigError;
 
@@ -23,7 +22,6 @@ pub enum UpdateStrategy {
     OnDelete,
 }
 
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChildConfig {
     pub update_strategy: UpdateStrategy,
@@ -31,9 +29,7 @@ pub struct ChildConfig {
 
 impl ChildConfig {
     pub fn new(update_strategy: UpdateStrategy) -> ChildConfig {
-        ChildConfig {
-            update_strategy,
-        }
+        ChildConfig { update_strategy }
     }
 
     pub fn recreate() -> ChildConfig {
@@ -114,7 +110,7 @@ pub enum Credentials {
     Pem {
         certificate_base64: String,
         private_key_base64: String,
-    }
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,8 +126,8 @@ pub struct ClientConfig {
 
 impl ClientConfig {
     pub fn from_service_account(user_agent: impl Into<String>) -> Result<ClientConfig, io::Error> {
-        use std::io::Read;
         use std::fs::File;
+        use std::io::Read;
 
         let mut token_file = File::open(SERVICE_ACCOUNT_TOKEN_PATH)?;
         let mut service_account_token = String::new();

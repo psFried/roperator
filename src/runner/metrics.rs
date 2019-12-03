@@ -1,16 +1,9 @@
-use crate::resource::ObjectIdRef;
 use crate::k8s_types::K8sType;
+use crate::resource::ObjectIdRef;
 
 use prometheus::{
-    exponential_buckets,
-    Registry,
-    Histogram,
-    HistogramOpts,
-    IntCounterVec,
-    IntGaugeVec,
-    IntCounter,
-    Opts,
-    IntGauge,
+    exponential_buckets, Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge,
+    IntGaugeVec, Opts, Registry,
 };
 
 use std::fmt::{self, Debug};
@@ -33,7 +26,6 @@ impl Debug for Metrics {
     }
 }
 
-
 fn id_labels<'a, 'b>(id: &'a ObjectIdRef<'b>) -> [&'a str; 2] {
     [id.as_parts().0.as_ref(), id.as_parts().1.as_ref()]
 }
@@ -43,51 +35,90 @@ fn id_labels<'a, 'b>(id: &'a ObjectIdRef<'b>) -> [&'a str; 2] {
 const NAMESPACE_AND_NAME: &[&str] = &["namespace", "name"];
 const API_VERSION_AND_KIND: &[&str] = &["apiVersion", "kind"];
 
-
 impl Metrics {
     pub fn new() -> Metrics {
         let registry = Registry::new();
 
-        let request_time_opts = HistogramOpts::new("api_server_request_time",
-                "Total time from sending the request to receiving the response headers")
-                .subsystem("client")
-                .buckets(exponential_buckets(0.005, 2.0, 12).unwrap());
+        let request_time_opts = HistogramOpts::new(
+            "api_server_request_time",
+            "Total time from sending the request to receiving the response headers",
+        )
+        .subsystem("client")
+        .buckets(exponential_buckets(0.005, 2.0, 12).unwrap());
         let api_server_request_times = Histogram::with_opts(request_time_opts).unwrap();
-        registry.register(Box::new(api_server_request_times.clone())).unwrap();
+        registry
+            .register(Box::new(api_server_request_times.clone()))
+            .unwrap();
 
         let watch_events_opts = Opts::new("events_received", "total number of events processed by the operator, including from watches and initial seeds");
         let total_watch_events_received = IntCounter::with_opts(watch_events_opts).unwrap();
-        registry.register(Box::new(total_watch_events_received.clone())).unwrap();
+        registry
+            .register(Box::new(total_watch_events_received.clone()))
+            .unwrap();
 
-        let sync_count_opts = Opts::new("sync_counts", "the number of times each parent has been synced")
-            .variable_label("namespace").variable_label("name");
+        let sync_count_opts = Opts::new(
+            "sync_counts",
+            "the number of times each parent has been synced",
+        )
+        .variable_label("namespace")
+        .variable_label("name");
         let sync_count_by_parent = IntCounterVec::new(sync_count_opts, NAMESPACE_AND_NAME).unwrap();
-        registry.register(Box::new(sync_count_by_parent.clone())).unwrap();
+        registry
+            .register(Box::new(sync_count_by_parent.clone()))
+            .unwrap();
 
-        let sync_error_opts = Opts::new("sync_errors", "the number of errors during sync by parent")
-                .variable_label("namespace").variable_label("name");
-        let sync_errors_by_parent = IntCounterVec::new(sync_error_opts, NAMESPACE_AND_NAME).unwrap();
-        registry.register(Box::new(sync_errors_by_parent.clone())).unwrap();
+        let sync_error_opts =
+            Opts::new("sync_errors", "the number of errors during sync by parent")
+                .variable_label("namespace")
+                .variable_label("name");
+        let sync_errors_by_parent =
+            IntCounterVec::new(sync_error_opts, NAMESPACE_AND_NAME).unwrap();
+        registry
+            .register(Box::new(sync_errors_by_parent.clone()))
+            .unwrap();
 
-        let resource_count_opts = Opts::new("cached_resources", "number of resources in the in-memory cache")
-                .variable_label("apiVersion").variable_label("kind");
-        let resources_by_type = IntGaugeVec::new(resource_count_opts, API_VERSION_AND_KIND).unwrap();
-        registry.register(Box::new(resources_by_type.clone())).unwrap();
+        let resource_count_opts = Opts::new(
+            "cached_resources",
+            "number of resources in the in-memory cache",
+        )
+        .variable_label("apiVersion")
+        .variable_label("kind");
+        let resources_by_type =
+            IntGaugeVec::new(resource_count_opts, API_VERSION_AND_KIND).unwrap();
+        registry
+            .register(Box::new(resources_by_type.clone()))
+            .unwrap();
 
-        let watcher_request_opts = Opts::new("watcher_requests", "number of requests from watchers")
-                .variable_label("apiVersion").variable_label("kind");
-        let watcher_requests_by_type = IntCounterVec::new(watcher_request_opts, API_VERSION_AND_KIND).unwrap();
-        registry.register(Box::new(watcher_requests_by_type.clone())).unwrap();
+        let watcher_request_opts =
+            Opts::new("watcher_requests", "number of requests from watchers")
+                .variable_label("apiVersion")
+                .variable_label("kind");
+        let watcher_requests_by_type =
+            IntCounterVec::new(watcher_request_opts, API_VERSION_AND_KIND).unwrap();
+        registry
+            .register(Box::new(watcher_requests_by_type.clone()))
+            .unwrap();
 
         let watcher_error_opts = Opts::new("watcher_errors", "number of errors from watchers")
-                .variable_label("apiVersion").variable_label("kind");
-        let watcher_errors_by_type = IntCounterVec::new(watcher_error_opts, API_VERSION_AND_KIND).unwrap();
-        registry.register(Box::new(watcher_errors_by_type.clone())).unwrap();
+            .variable_label("apiVersion")
+            .variable_label("kind");
+        let watcher_errors_by_type =
+            IntCounterVec::new(watcher_error_opts, API_VERSION_AND_KIND).unwrap();
+        registry
+            .register(Box::new(watcher_errors_by_type.clone()))
+            .unwrap();
 
-        let watcher_event_opts = Opts::new("watch_events", "number of watch events received by watchers")
-                .variable_label("apiVersion").variable_label("kind");
-        let watch_events_by_type = IntCounterVec::new(watcher_event_opts, API_VERSION_AND_KIND).unwrap();
-        registry.register(Box::new(watch_events_by_type.clone())).unwrap();
+        let watcher_event_opts = Opts::new(
+            "watch_events",
+            "number of watch events received by watchers",
+        )
+        .variable_label("apiVersion")
+        .variable_label("kind");
+        let watch_events_by_type =
+            IntCounterVec::new(watcher_event_opts, API_VERSION_AND_KIND).unwrap();
+        registry
+            .register(Box::new(watch_events_by_type.clone()))
+            .unwrap();
 
         Metrics {
             registry,
@@ -134,7 +165,9 @@ impl Metrics {
     }
 
     pub fn parent_sync_error(&self, id: &ObjectIdRef<'_>) {
-        self.sync_errors_by_parent.with_label_values(&id_labels(id)).inc();
+        self.sync_errors_by_parent
+            .with_label_values(&id_labels(id))
+            .inc();
     }
 
     pub fn encode_as_text(&self) -> Result<Vec<u8>, prometheus::Error> {

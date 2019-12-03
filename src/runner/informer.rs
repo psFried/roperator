@@ -1,19 +1,18 @@
-use crate::resource::{K8sResource, ObjectId, ObjectIdRef, InvalidResourceError};
-use crate::k8s_types::K8sType;
-use crate::runner::client::{Client, Error as ClientError, WatchEvent, ApiError, ObjectList};
-use crate::runner::metrics::WatcherMetrics;
 use crate::error::Error;
+use crate::k8s_types::K8sType;
+use crate::resource::{InvalidResourceError, K8sResource, ObjectId, ObjectIdRef};
+use crate::runner::client::{ApiError, Client, Error as ClientError, ObjectList, WatchEvent};
+use crate::runner::metrics::WatcherMetrics;
 
 use serde_json::Value;
-use tokio::sync::{Mutex, MutexGuard};
-use tokio::sync::mpsc::{Sender, error::SendError};
 use tokio::executor::Executor;
+use tokio::sync::mpsc::{error::SendError, Sender};
+use tokio::sync::{Mutex, MutexGuard};
 
-use std::sync::{Arc};
 use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
 use std::fmt::{self, Debug, Display};
-
+use std::hash::Hash;
+use std::sync::Arc;
 
 #[derive(Debug)]
 struct ResourceCache(HashMap<ObjectId, K8sResource>);
@@ -40,7 +39,6 @@ impl ResourceCache {
         self.0.clear();
     }
 }
-
 
 #[derive(Debug)]
 pub struct LabelToIdIndex {
@@ -88,7 +86,6 @@ impl ReverseIndex for LabelToIdIndex {
     fn lookup<'a, 'b>(&'a self, key: &'b str) -> Option<&'a HashSet<ObjectId>> {
         self.entries.get(key)
     }
-
 }
 
 #[derive(Debug)]
@@ -108,7 +105,8 @@ impl ReverseIndex for UidToIdIndex {
     }
 
     fn insert(&mut self, key: &str, value: &K8sResource) {
-        self.0.insert(key.to_owned(), value.get_object_id().into_owned());
+        self.0
+            .insert(key.to_owned(), value.get_object_id().into_owned());
     }
 
     fn remove_one(&mut self, key: &str, _: &ObjectId) {
@@ -147,8 +145,7 @@ struct CacheAndIndex<I: ReverseIndex> {
     is_initialized: bool,
 }
 
-impl <I: ReverseIndex> CacheAndIndex<I> {
-
+impl<I: ReverseIndex> CacheAndIndex<I> {
     fn new(index: I) -> Self {
         CacheAndIndex {
             error: Some(MonitorBackendErr::StateUnininitialized.into_boxed_error()),
@@ -188,7 +185,11 @@ impl <I: ReverseIndex> CacheAndIndex<I> {
 
 impl CacheAndIndex<UidToIdIndex> {
     fn get_by_uid(&self, uid: &str) -> Option<K8sResource> {
-        let CacheAndIndex {ref index, ref cache, .. } = *self;
+        let CacheAndIndex {
+            ref index,
+            ref cache,
+            ..
+        } = *self;
         index.lookup(uid).and_then(|id| cache.get_copy(id))
     }
 }
@@ -198,7 +199,10 @@ impl CacheAndIndex<LabelToIdIndex> {
         let mut results = Vec::new();
         if let Some(ids) = self.index.lookup(key) {
             for id in ids {
-                let obj = self.cache.get_copy(id).expect("cache and index are inconsistent");
+                let obj = self
+                    .cache
+                    .get_copy(id)
+                    .expect("cache and index are inconsistent");
                 results.push(obj);
             }
         }
@@ -206,16 +210,13 @@ impl CacheAndIndex<LabelToIdIndex> {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventType {
     Created,
     Updated,
     Finalizing,
     Deleted,
-    UpdateOperationComplete {
-        retry: bool
-    },
+    UpdateOperationComplete { retry: bool },
 }
 
 #[derive(Clone, PartialEq)]
@@ -228,29 +229,34 @@ pub struct ResourceMessage {
 
 impl Debug for ResourceMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}({:?}, {}, {}, {:?})", std::any::type_name::<ResourceMessage>(),
-                self.event_type, self.resource_type, self.resource_id, self.index_key)
+        write!(
+            f,
+            "{}({:?}, {}, {}, {:?})",
+            std::any::type_name::<ResourceMessage>(),
+            self.event_type,
+            self.resource_type,
+            self.resource_id,
+            self.index_key
+        )
     }
 }
 
-
 pub struct ResourceState<'a, I: ReverseIndex>(MutexGuard<'a, CacheAndIndex<I>>);
 
-impl <'a, I: ReverseIndex> ResourceState<'a, I> {
-
-    #[cfg(feature="testkit")]
+impl<'a, I: ReverseIndex> ResourceState<'a, I> {
+    #[cfg(feature = "testkit")]
     pub fn get_by_id(&self, id: &ObjectIdRef<'_>) -> Option<K8sResource> {
         self.0.cache.get_copy(id)
     }
 }
 
-impl <'a> ResourceState<'a, UidToIdIndex> {
+impl<'a> ResourceState<'a, UidToIdIndex> {
     pub fn get_by_uid(&self, uid: &str) -> Option<K8sResource> {
         self.0.get_by_uid(uid)
     }
 }
 
-impl <'a> ResourceState<'a, LabelToIdIndex> {
+impl<'a> ResourceState<'a, LabelToIdIndex> {
     pub fn get_all_resources_by_index_key(&self, key: &str) -> Vec<K8sResource> {
         self.0.get_all_resources_by_index_key(key)
     }
@@ -261,9 +267,7 @@ pub struct ResourceMonitor<I: ReverseIndex> {
     cache_and_index: Arc<Mutex<CacheAndIndex<I>>>,
 }
 
-
-impl <I: ReverseIndex> ResourceMonitor<I> {
-
+impl<I: ReverseIndex> ResourceMonitor<I> {
     pub async fn lock_state(&self) -> Result<ResourceState<'_, I>, Error> {
         let mut lock = self.cache_and_index.lock().await;
         if let Some(err) = lock.error.take() {
@@ -274,9 +278,7 @@ impl <I: ReverseIndex> ResourceMonitor<I> {
             Ok(ResourceState(lock))
         }
     }
-
 }
-
 
 #[derive(Debug)]
 enum MonitorBackendErr {
@@ -312,7 +314,6 @@ impl std::error::Error for MonitorBackendErr {
     }
 }
 
-
 impl MonitorBackendErr {
     fn into_boxed_error(self) -> Error {
         Box::new(self)
@@ -332,7 +333,6 @@ impl MonitorBackendErr {
         }
     }
 }
-
 
 impl From<ApiError> for MonitorBackendErr {
     fn from(err: ApiError) -> MonitorBackendErr {
@@ -366,20 +366,62 @@ impl From<SendError> for MonitorBackendErr {
     }
 }
 
-
-pub fn start_child_monitor(executor: &mut impl Executor, label_name: String, namespace: Option<String>, k8s_type: &'static K8sType, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<LabelToIdIndex> {
+pub fn start_child_monitor(
+    executor: &mut impl Executor,
+    label_name: String,
+    namespace: Option<String>,
+    k8s_type: &'static K8sType,
+    client: Client,
+    sender: Sender<ResourceMessage>,
+    watcher_metrics: WatcherMetrics,
+) -> ResourceMonitor<LabelToIdIndex> {
     let index = LabelToIdIndex::new(label_name.clone());
-    start_monitor(executor, index, k8s_type, namespace, Some(label_name), client, sender, watcher_metrics)
+    start_monitor(
+        executor,
+        index,
+        k8s_type,
+        namespace,
+        Some(label_name),
+        client,
+        sender,
+        watcher_metrics,
+    )
 }
 
-pub fn start_parent_monitor(executor: &mut impl Executor, namespace: Option<String>, k8s_type: &'static K8sType, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<UidToIdIndex> {
-    start_monitor(executor, UidToIdIndex::new(), k8s_type, namespace, None, client, sender, watcher_metrics)
+pub fn start_parent_monitor(
+    executor: &mut impl Executor,
+    namespace: Option<String>,
+    k8s_type: &'static K8sType,
+    client: Client,
+    sender: Sender<ResourceMessage>,
+    watcher_metrics: WatcherMetrics,
+) -> ResourceMonitor<UidToIdIndex> {
+    start_monitor(
+        executor,
+        UidToIdIndex::new(),
+        k8s_type,
+        namespace,
+        None,
+        client,
+        sender,
+        watcher_metrics,
+    )
 }
 
-fn start_monitor<I: ReverseIndex>(executor: &mut impl Executor, index: I, k8s_type: &'static K8sType, namespace: Option<String>, label_selector: Option<String>, client: Client, sender: Sender<ResourceMessage>, watcher_metrics: WatcherMetrics) -> ResourceMonitor<I> {
-
+fn start_monitor<I: ReverseIndex>(
+    executor: &mut impl Executor,
+    index: I,
+    k8s_type: &'static K8sType,
+    namespace: Option<String>,
+    label_selector: Option<String>,
+    client: Client,
+    sender: Sender<ResourceMessage>,
+    watcher_metrics: WatcherMetrics,
+) -> ResourceMonitor<I> {
     let cache_and_index = Arc::new(Mutex::new(CacheAndIndex::new(index)));
-    let frontend = ResourceMonitor { cache_and_index: cache_and_index.clone() };
+    let frontend = ResourceMonitor {
+        cache_and_index: cache_and_index.clone(),
+    };
 
     let backend = ResourceMonitorBackend {
         metrics: watcher_metrics,
@@ -390,9 +432,11 @@ fn start_monitor<I: ReverseIndex>(executor: &mut impl Executor, index: I, k8s_ty
         label_selector,
         namespace,
     };
-    executor.spawn(Box::pin(async move {
-        backend.run().await;
-    })).expect("Failed to spawn watcher task");
+    executor
+        .spawn(Box::pin(async move {
+            backend.run().await;
+        }))
+        .expect("Failed to spawn watcher task");
     frontend
 }
 
@@ -406,10 +450,13 @@ struct ResourceMonitorBackend<I: ReverseIndex> {
     namespace: Option<String>,
 }
 
-impl <I: ReverseIndex> ResourceMonitorBackend<I> {
-
+impl<I: ReverseIndex> ResourceMonitorBackend<I> {
     async fn run(mut self) {
-        log::debug!("Starting monitoring resources of type: {:?} with selector: {:?}", self.k8s_type, self.label_selector);
+        log::debug!(
+            "Starting monitoring resources of type: {:?} with selector: {:?}",
+            self.k8s_type,
+            self.label_selector
+        );
 
         loop {
             let result = self.seed_cache().await;
@@ -424,7 +471,11 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
                     }
                 }
                 Err(err) => {
-                    log::error!("Error seeding cache for type: {:?}: {:?}", self.k8s_type, err);
+                    log::error!(
+                        "Error seeding cache for type: {:?}: {:?}",
+                        self.k8s_type,
+                        err
+                    );
                     if !self.handle_error(err).await {
                         break;
                     }
@@ -437,7 +488,11 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
     async fn handle_error(&mut self, error: MonitorBackendErr) -> bool {
         let is_http_410 = error.is_resource_version_expired();
         let is_send_err = error.is_send_err();
-        log::error!("Error in monitor for type: {:?}, err: {:?}", self.k8s_type, error);
+        log::error!(
+            "Error in monitor for type: {:?}, err: {:?}",
+            self.k8s_type,
+            error
+        );
         let mut lock = self.cache_and_index.lock().await;
         lock.error = Some(error.into_boxed_error());
         lock.is_initialized = false;
@@ -455,7 +510,11 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         loop {
             self.metrics.request_started();
             let result = self.do_watch(&resource_version).await;
-            log::debug!("Watch of {:?} ended with result: {:?}", self.k8s_type, result);
+            log::debug!(
+                "Watch of {:?} ended with result: {:?}",
+                self.k8s_type,
+                result
+            );
 
             match result {
                 Ok(Some(vers)) => {
@@ -473,13 +532,25 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         }
     }
 
-    async fn do_watch(&mut self, resource_version: &str) -> Result<Option<String>, MonitorBackendErr> {
-        log::debug!("Starting watch of: {:?} with resourceVersion: {:?}", self.k8s_type, resource_version);
+    async fn do_watch(
+        &mut self,
+        resource_version: &str,
+    ) -> Result<Option<String>, MonitorBackendErr> {
+        log::debug!(
+            "Starting watch of: {:?} with resourceVersion: {:?}",
+            self.k8s_type,
+            resource_version
+        );
 
-        let mut lines = self.client.watch(&*self.k8s_type,
+        let mut lines = self
+            .client
+            .watch(
+                &*self.k8s_type,
                 self.namespace.as_ref().map(String::as_str),
                 Some(resource_version),
-                self.label_selector.as_ref().map(String::as_str)).await?;
+                self.label_selector.as_ref().map(String::as_str),
+            )
+            .await?;
 
         let mut new_version: Option<String> = None;
         loop {
@@ -496,13 +567,17 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         Ok(new_version)
     }
 
-    async fn handle_event(&mut self, event: WatchEvent) -> Result<String,  MonitorBackendErr> {
+    async fn handle_event(&mut self, event: WatchEvent) -> Result<String, MonitorBackendErr> {
         let (event_type, object) = match event {
             WatchEvent::Added(res) => (EventType::Created, res),
             WatchEvent::Deleted(res) => (EventType::Deleted, res),
             WatchEvent::Modified(res) => (get_update_event_type(&res), res),
             WatchEvent::Error(err) => {
-                log::warn!("Got apiError for watch on : {:?}, err: {:?}", self.k8s_type, err);
+                log::warn!(
+                    "Got apiError for watch on : {:?}, err: {:?}",
+                    self.k8s_type,
+                    err
+                );
                 return Err(err.into());
             }
         };
@@ -523,29 +598,46 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
             }
         }
 
-        self.metrics.set_resource_count(cache_and_index.resource_count());
-        let to_send = ResourceMessage { event_type, resource_type, resource_id, index_key };
+        self.metrics
+            .set_resource_count(cache_and_index.resource_count());
+        let to_send = ResourceMessage {
+            event_type,
+            resource_type,
+            resource_id,
+            index_key,
+        };
         self.sender.send(to_send).await?;
         Ok(resource_version)
     }
 
     async fn seed_cache(&mut self) -> Result<String, MonitorBackendErr> {
-        log::info!("Seeding resources of type: {:?} with selector: {:?}", self.k8s_type, self.label_selector);
+        log::info!(
+            "Seeding resources of type: {:?} with selector: {:?}",
+            self.k8s_type,
+            self.label_selector
+        );
         // lock the cache now and hold it until we're done, so that consumers don't get an inconsistent view of it
         let mut cache_and_index = self.cache_and_index.lock().await;
         cache_and_index.is_initialized = false;
         cache_and_index.clear_all();
 
         self.metrics.request_started();
-        let list = self.client.list_all(&*self.k8s_type, self.namespace.as_ref().map(String::as_str), self.label_selector.as_ref().map(String::as_str)).await?;
+        let list = self
+            .client
+            .list_all(
+                &*self.k8s_type,
+                self.namespace.as_ref().map(String::as_str),
+                self.label_selector.as_ref().map(String::as_str),
+            )
+            .await?;
         // safe unwrap since RawApi can only fail when setting the request body, but it's hard coded to an empty veec
-        let ObjectList {metadata, items} = list;
-        let resource_version = metadata.resource_version.ok_or_else(|| {
-            InvalidResourceError {
+        let ObjectList { metadata, items } = list;
+        let resource_version = metadata
+            .resource_version
+            .ok_or_else(|| InvalidResourceError {
                 message: "list result from api server is missing metadata.resourceVersion",
                 value: Value::Null,
-            }
-        })?;
+            })?;
 
         for mut object in items {
             self.add_metadata_to_list_object(&mut object)?;
@@ -554,12 +646,18 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
             let event_type = get_update_event_type(resource.as_ref());
             let resource_type = self.k8s_type;
             let resource_id = resource.get_object_id().into_owned();
-            let message = ResourceMessage { event_type, resource_type, resource_id, index_key };
+            let message = ResourceMessage {
+                event_type,
+                resource_type,
+                resource_id,
+                index_key,
+            };
 
             cache_and_index.add(resource);
             self.sender.send(message).await?;
         }
-        self.metrics.set_resource_count(cache_and_index.resource_count());
+        self.metrics
+            .set_resource_count(cache_and_index.resource_count());
         // set the initialization flag, which will allow the frontend to read from the cache
         cache_and_index.is_initialized = true;
         // drop the cache_and_index lock when we exit this function, which allows consumers to read from it
@@ -567,16 +665,23 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
     }
 
     /// For some reason, it seems that apiVersion and kind are missing from the individual response items in the list response
-    fn add_metadata_to_list_object(&self, list_object: &mut Value) -> Result<(), InvalidResourceError> {
+    fn add_metadata_to_list_object(
+        &self,
+        list_object: &mut Value,
+    ) -> Result<(), InvalidResourceError> {
         match list_object.as_object_mut() {
             Some(obj) => {
-                obj.insert("apiVersion".to_owned(), self.k8s_type.api_version.to_string().into());
+                obj.insert(
+                    "apiVersion".to_owned(),
+                    self.k8s_type.api_version.to_string().into(),
+                );
                 obj.insert("kind".to_owned(), self.k8s_type.kind.to_string().into());
                 Ok(())
             }
-            None => {
-                Err(InvalidResourceError::new("list item must be an object", list_object.clone()))
-            }
+            None => Err(InvalidResourceError::new(
+                "list item must be an object",
+                list_object.clone(),
+            )),
         }
     }
 }

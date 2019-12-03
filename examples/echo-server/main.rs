@@ -1,11 +1,10 @@
 //! Example of using roperator to create an operator for an `EchoServer` example Custom Resource
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 
 use roperator::prelude::{
-    run_operator,
-    OperatorConfig, ChildConfig,
-    k8s_types, K8sType, K8sResource, Error,
-    SyncRequest, SyncResponse,
+    k8s_types, run_operator, ChildConfig, Error, K8sResource, K8sType, OperatorConfig, SyncRequest,
+    SyncResponse,
 };
 use roperator::serde_json::{json, Value};
 
@@ -61,8 +60,8 @@ fn main() {
     // between the desired and actual state of a resource of that type. For example, Pods cannot generally be updated in-place,
     // but must be deleted and re-created.
     let operator_config = OperatorConfig::new(OPERATOR_NAME, PARENT_TYPE)
-            .with_child(k8s_types::core::v1::Pod, ChildConfig::recreate())
-            .with_child(k8s_types::core::v1::Service, ChildConfig::replace());
+        .with_child(k8s_types::core::v1::Pod, ChildConfig::recreate())
+        .with_child(k8s_types::core::v1::Service, ChildConfig::replace());
 
     // now we run the operator, passing in our handler function
     let err = run_operator(operator_config, handle_sync);
@@ -79,10 +78,7 @@ fn handle_sync(request: &SyncRequest) -> Result<SyncResponse, Error> {
         "message": get_current_status_message(request),
     });
     let children = get_desired_children(request)?;
-    Ok(SyncResponse {
-        status,
-        children
-    })
+    Ok(SyncResponse { status, children })
 }
 
 /// Returns the json value that should be set on the parent EchoServer
@@ -91,10 +87,9 @@ fn get_current_status_message(request: &SyncRequest) -> String {
     let pods = children.of_type_raw("v1", "Pod");
     let pod: Option<&K8sResource> = pods.first();
     pod.and_then(|p| p.pointer("/status/message").and_then(Value::as_str))
-            .unwrap_or("Waiting for Pod to be initialized")
-            .to_owned()
+        .unwrap_or("Waiting for Pod to be initialized")
+        .to_owned()
 }
-
 
 /// Returns the children that we want for the given parent
 fn get_desired_children(request: &SyncRequest) -> Result<Vec<Value>, Error> {

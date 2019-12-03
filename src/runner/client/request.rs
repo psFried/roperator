@@ -1,12 +1,12 @@
 use crate::config::{ClientConfig, Credentials};
 use crate::k8s_types::K8sType;
+use crate::resource::{K8sResource, ObjectIdRef};
 use crate::runner::client::Error;
-use crate::resource::{ObjectIdRef, K8sResource};
 
-use url::Url;
+use http::{header, Method, Request};
 use hyper::Body;
-use http::{Request, header, Method};
 use serde_json::Value;
+use url::Url;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -34,10 +34,17 @@ pub struct Patch {
 
 impl Patch {
     pub fn remove_finalizer(resource: &K8sResource, finalizer: &str) -> Patch {
-        let finalizers = resource.as_ref().pointer("/metadata/finalizers")
-                .and_then(Value::as_array)
-                .map(|finalizers| finalizers.iter().filter(|f| f.as_str() != Some(finalizer)).collect::<Vec<_>>())
-                .unwrap_or(Vec::new());
+        let finalizers = resource
+            .as_ref()
+            .pointer("/metadata/finalizers")
+            .and_then(Value::as_array)
+            .map(|finalizers| {
+                finalizers
+                    .iter()
+                    .filter(|f| f.as_str() != Some(finalizer))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or(Vec::new());
         let patch = serde_json::json!({
             "metadata": {
                 "namespace": resource.get_object_id().namespace(),
@@ -53,10 +60,12 @@ impl Patch {
     }
 
     pub fn add_finalizer(resource: &K8sResource, finalizer: &str) -> Patch {
-        let mut finalizers = resource.as_ref().pointer("/metadata/finalizers")
-                .and_then(Value::as_array)
-                .map(|finalizers| finalizers.clone())
-                .unwrap_or(Vec::new());
+        let mut finalizers = resource
+            .as_ref()
+            .pointer("/metadata/finalizers")
+            .and_then(Value::as_array)
+            .map(|finalizers| finalizers.clone())
+            .unwrap_or(Vec::new());
         finalizers.push(Value::String(finalizer.to_string()));
         let value = serde_json::json!({
             "metadata": {
@@ -73,7 +82,12 @@ impl Patch {
     }
 }
 
-pub fn patch_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &ObjectIdRef<'_>, patch: &Patch) -> Result<Request<Body>, Error> {
+pub fn patch_request(
+    client_config: &ClientConfig,
+    k8s_type: &K8sType,
+    id: &ObjectIdRef<'_>,
+    patch: &Patch,
+) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
     let mut builder = make_req(url, Method::PATCH, client_config);
     let header_value = patch.merge_strategy.content_type();
@@ -83,15 +97,25 @@ pub fn patch_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &Obje
     Ok(req)
 }
 
-#[cfg(feature="testkit")]
-pub fn get_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<Request<Body>, Error> {
+#[cfg(feature = "testkit")]
+pub fn get_request(
+    client_config: &ClientConfig,
+    k8s_type: &K8sType,
+    id: &ObjectIdRef<'_>,
+) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
 
-    let req = make_req(url, Method::GET, client_config).body(Body::empty()).unwrap();
+    let req = make_req(url, Method::GET, client_config)
+        .body(Body::empty())
+        .unwrap();
     Ok(req)
 }
 
-pub fn create_request(client_config: &ClientConfig, k8s_type: &K8sType, resource: &Value) -> Result<Request<Body>, Error> {
+pub fn create_request(
+    client_config: &ClientConfig,
+    k8s_type: &K8sType,
+    resource: &Value,
+) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, get_namespace(resource), None);
 
     let mut builder = make_req(url, Method::POST, client_config);
@@ -100,15 +124,26 @@ pub fn create_request(client_config: &ClientConfig, k8s_type: &K8sType, resource
     Ok(req)
 }
 
-pub fn replace_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &ObjectIdRef<'_>, resource: &Value) -> Result<Request<Body>, Error> {
+pub fn replace_request(
+    client_config: &ClientConfig,
+    k8s_type: &K8sType,
+    id: &ObjectIdRef<'_>,
+    resource: &Value,
+) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
     let as_vec = serde_json::to_vec(resource)?;
-    let req = make_req(url, Method::PUT, client_config).body(Body::from(as_vec)).unwrap();
+    let req = make_req(url, Method::PUT, client_config)
+        .body(Body::from(as_vec))
+        .unwrap();
     Ok(req)
 }
 
-pub fn update_status_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &ObjectIdRef<'_>, new_status: &Value) -> Result<Request<Body>, Error> {
-
+pub fn update_status_request(
+    client_config: &ClientConfig,
+    k8s_type: &K8sType,
+    id: &ObjectIdRef<'_>,
+    new_status: &Value,
+) -> Result<Request<Body>, Error> {
     let mut url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
     {
         let mut path = url.path_segments_mut().unwrap();
@@ -116,20 +151,31 @@ pub fn update_status_request(client_config: &ClientConfig, k8s_type: &K8sType, i
     }
     let as_vec = serde_json::to_vec(new_status)?;
     let req = make_req(url, Method::PUT, client_config)
-            .body(Body::from(as_vec))
-            .unwrap();
+        .body(Body::from(as_vec))
+        .unwrap();
     Ok(req)
 }
 
-pub fn delete_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<Request<Body>, Error> {
+pub fn delete_request(
+    client_config: &ClientConfig,
+    k8s_type: &K8sType,
+    id: &ObjectIdRef<'_>,
+) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
     let req = make_req(url, Method::DELETE, client_config)
-            .body(Body::empty())
-            .unwrap();
+        .body(Body::empty())
+        .unwrap();
     Ok(req)
 }
 
-pub fn watch_request(client_config: &ClientConfig, k8s_type: &K8sType, resource_version: Option<&str>, label_selector: Option<&str>, timeout_seconds: Option<u32>, namespace: Option<&str>) -> Result<Request<Body>, Error> {
+pub fn watch_request(
+    client_config: &ClientConfig,
+    k8s_type: &K8sType,
+    resource_version: Option<&str>,
+    label_selector: Option<&str>,
+    timeout_seconds: Option<u32>,
+    namespace: Option<&str>,
+) -> Result<Request<Body>, Error> {
     let mut url = make_url(client_config, k8s_type, namespace, None);
     {
         let mut query = url.query_pairs_mut();
@@ -147,29 +193,39 @@ pub fn watch_request(client_config: &ClientConfig, k8s_type: &K8sType, resource_
     }
 
     let req = make_req(url, Method::GET, client_config)
-            .body(Body::empty())
-            .unwrap();
+        .body(Body::empty())
+        .unwrap();
     Ok(req)
 }
 
-pub fn list_request(client_config: &ClientConfig, k8s_type: &K8sType, label_selector: Option<&str>, namespace: Option<&str>) -> Result<Request<Body>, Error> {
+pub fn list_request(
+    client_config: &ClientConfig,
+    k8s_type: &K8sType,
+    label_selector: Option<&str>,
+    namespace: Option<&str>,
+) -> Result<Request<Body>, Error> {
     let mut url = make_url(client_config, k8s_type, namespace, None);
     if let Some(selector) = label_selector {
         let mut query = url.query_pairs_mut();
         query.append_pair("labelSelector", selector);
     }
     let req = make_req(url, Method::GET, client_config)
-            .body(Body::empty())
-            .unwrap();
+        .body(Body::empty())
+        .unwrap();
     Ok(req)
 }
 
-fn make_req(url: Url, method: http::Method, client_config: &ClientConfig) -> http::request::Builder {
+fn make_req(
+    url: Url,
+    method: http::Method,
+    client_config: &ClientConfig,
+) -> http::request::Builder {
     let mut builder = Request::builder();
-    builder.method(method)
-            .uri(url.into_string())
-            .header(header::ACCEPT, "application/json")
-            .header(header::USER_AGENT, client_config.user_agent.as_str());
+    builder
+        .method(method)
+        .uri(url.into_string())
+        .header(header::ACCEPT, "application/json")
+        .header(header::USER_AGENT, client_config.user_agent.as_str());
 
     match client_config.credentials {
         Credentials::Header(ref value) => {
@@ -181,20 +237,23 @@ fn make_req(url: Url, method: http::Method, client_config: &ClientConfig) -> htt
 }
 
 fn get_namespace(resource: &Value) -> Option<&str> {
-    resource.pointer("/metadata/namespace").and_then(Value::as_str)
+    resource
+        .pointer("/metadata/namespace")
+        .and_then(Value::as_str)
 }
 
-fn make_url(client_config: &ClientConfig, k8s_type: &K8sType, namespace: Option<&str>, name: Option<&str>) -> Url {
+fn make_url(
+    client_config: &ClientConfig,
+    k8s_type: &K8sType,
+    namespace: Option<&str>,
+    name: Option<&str>,
+) -> Url {
     let mut url = url::Url::parse(client_config.api_server_endpoint.as_str()).unwrap();
     {
         let mut segments = url.path_segments_mut().unwrap();
         let group = k8s_type.group();
 
-        let prefix = if group.len() > 0 {
-            "apis"
-        } else {
-            "api"
-        };
+        let prefix = if group.len() > 0 { "apis" } else { "api" };
         segments.push(prefix);
         if !group.is_empty() {
             segments.push(group);

@@ -1,9 +1,9 @@
-use crate::resource::{K8sResource, ObjectIdRef, K8sTypeRef};
 use crate::error::Error;
+use crate::resource::{K8sResource, K8sTypeRef, ObjectIdRef};
 
-use serde_json::{Value};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde_json::Value;
 
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
@@ -26,7 +26,8 @@ impl Debug for SyncRequest {
             serde_json::to_string_pretty(self)
         } else {
             serde_json::to_string(self)
-        }.map_err(|_| fmt::Error)?;
+        }
+        .map_err(|_| fmt::Error)?;
 
         f.write_str(as_string.as_str())
     }
@@ -46,17 +47,31 @@ impl SyncRequest {
     }
 
     /// Returns an iterator over the child resources that have the given apiVersion and kind
-    pub fn iter_children_with_type<'a, 'b: 'a>(&'a self, api_version: &'b str, kind: &'b str) -> impl Iterator<Item=&'a K8sResource> {
+    pub fn iter_children_with_type<'a, 'b: 'a>(
+        &'a self,
+        api_version: &'b str,
+        kind: &'b str,
+    ) -> impl Iterator<Item = &'a K8sResource> {
         let type_ref = K8sTypeRef::new(api_version, kind);
-        self.children.iter().filter(move |child| child.get_type_ref() == type_ref)
+        self.children
+            .iter()
+            .filter(move |child| child.get_type_ref() == type_ref)
     }
 
     /// Finds a child resource with the given type and id, and returns a reference to the raw json.
     /// The namespace can be an empty str for resources that are not namespaced
-    pub fn raw_child<'a, 'b>(&'a self, api_version: &'b str, kind: &'b str, namespace: &'b str, name: &'b str) -> Option<&'a K8sResource> {
+    pub fn raw_child<'a, 'b>(
+        &'a self,
+        api_version: &'b str,
+        kind: &'b str,
+        namespace: &'b str,
+        name: &'b str,
+    ) -> Option<&'a K8sResource> {
         let id = ObjectIdRef::new(namespace, name);
         let type_ref = K8sTypeRef::new(api_version, kind);
-        self.children.iter().find(move |child| child.get_type_ref() == type_ref && child.get_object_id() == id)
+        self.children
+            .iter()
+            .find(move |child| child.get_type_ref() == type_ref && child.get_object_id() == id)
     }
 
     /// returns true if the request contains a child with the given type and id.
@@ -67,10 +82,15 @@ impl SyncRequest {
 
     /// Finds a child resource with the given type and id, and attempts to deserialize it.
     /// The namespace can be an empty str for resources that are not namespaced
-    pub fn deserialize_child<T: DeserializeOwned>(&self, api_version: &str, kind: &str, namespace: &str, name: &str) -> Option<Result<T, serde_json::Error>> {
-        self.raw_child(api_version, kind, namespace, name).map(|child| {
-            serde_json::from_value(child.clone().into_value())
-        })
+    pub fn deserialize_child<T: DeserializeOwned>(
+        &self,
+        api_version: &str,
+        kind: &str,
+        namespace: &str,
+        name: &str,
+    ) -> Option<Result<T, serde_json::Error>> {
+        self.raw_child(api_version, kind, namespace, name)
+            .map(|child| serde_json::from_value(child.clone().into_value()))
     }
 }
 
@@ -84,7 +104,7 @@ pub struct TypedView<'a, T: DeserializeOwned> {
     _phantom: PhantomData<T>,
 }
 
-impl <'a, T: DeserializeOwned> TypedView<'a, T> {
+impl<'a, T: DeserializeOwned> TypedView<'a, T> {
     fn new(req: &'a SyncRequest, api_version: &'a str, kind: &'a str) -> Self {
         TypedView {
             api_version,
@@ -97,12 +117,14 @@ impl <'a, T: DeserializeOwned> TypedView<'a, T> {
     /// Returns true if the given child exists in this `SyncRequest`, otherwise false. Namespace
     /// can be an empty str for resources that are not namespaced.
     pub fn exists(&self, namespace: &str, name: &str) -> bool {
-        self.req.has_child(self.api_version, self.kind, namespace, name)
+        self.req
+            .has_child(self.api_version, self.kind, namespace, name)
     }
 
     /// Attempts to deserialize the resource with the given namespace and name
     pub fn get(&self, namespace: &str, name: &str) -> Option<Result<T, serde_json::Error>> {
-        self.req.deserialize_child(self.api_version, self.kind, namespace, name)
+        self.req
+            .deserialize_child(self.api_version, self.kind, namespace, name)
     }
 
     pub fn first(&self) -> Option<Result<T, serde_json::Error>> {
@@ -111,8 +133,9 @@ impl <'a, T: DeserializeOwned> TypedView<'a, T> {
     }
 
     /// Returns an iterator over the raw `K8sResource` children that match the apiVersion and kind
-    pub fn iter_raw(&self) -> impl Iterator<Item=&K8sResource> {
-        self.req.iter_children_with_type(self.api_version, self.kind)
+    pub fn iter_raw(&self) -> impl Iterator<Item = &K8sResource> {
+        self.req
+            .iter_children_with_type(self.api_version, self.kind)
     }
 
     /// Returns an iterator over the child resources that deserializes each of the child resources as the given type
@@ -129,7 +152,7 @@ pub struct TypedIter<'a, T: DeserializeOwned> {
     _phantom: PhantomData<T>,
 }
 
-impl <'a, T: DeserializeOwned> TypedIter<'a, T> {
+impl<'a, T: DeserializeOwned> TypedIter<'a, T> {
     fn new(req: &'a SyncRequest) -> TypedIter<'a, T> {
         TypedIter {
             req,
@@ -138,12 +161,16 @@ impl <'a, T: DeserializeOwned> TypedIter<'a, T> {
         }
     }
 }
-impl <'a, T: DeserializeOwned> Iterator for TypedIter<'a, T> {
+impl<'a, T: DeserializeOwned> Iterator for TypedIter<'a, T> {
     type Item = Result<T, serde_json::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let next = self.req.children.get(self.index).map(|c| serde_json::from_value(c.clone().into_value()));
+            let next = self
+                .req
+                .children
+                .get(self.index)
+                .map(|c| serde_json::from_value(c.clone().into_value()));
             self.index += 1;
             match next {
                 Some(res) => {
@@ -160,28 +187,31 @@ impl <'a, T: DeserializeOwned> Iterator for TypedIter<'a, T> {
 /// A view of raw `K8sResource` children that share the same apiVersion and kind, which provides
 /// convenient accessor functions
 #[derive(Debug)]
-pub struct RawView<'a>{
+pub struct RawView<'a> {
     api_version: &'a str,
     kind: &'a str,
     req: &'a SyncRequest,
 }
 
-impl <'a> RawView<'a> {
+impl<'a> RawView<'a> {
     /// Returns true if the given child exists in this `SyncRequest`, otherwise false. Namespace
     /// can be an empty str for resources that are not namespaced.
     pub fn exists(&self, namespace: &str, name: &str) -> bool {
-        self.req.has_child(self.api_version, self.kind, namespace, name)
+        self.req
+            .has_child(self.api_version, self.kind, namespace, name)
     }
 
     /// Returns a reference to the raw `K8sResource` of this type if it exists.
     /// Namespace can be an empty str for resources that are not namespaced
     pub fn get(&self, namespace: &str, name: &str) -> Option<&K8sResource> {
-        self.req.raw_child(self.api_version, self.kind, namespace, name)
+        self.req
+            .raw_child(self.api_version, self.kind, namespace, name)
     }
 
     /// Returns an iterator over all of the resources of this type
-    pub fn iter(&self) -> impl Iterator<Item=&K8sResource> {
-        self.req.iter_children_with_type(self.api_version, self.kind)
+    pub fn iter(&self) -> impl Iterator<Item = &K8sResource> {
+        self.req
+            .iter_children_with_type(self.api_version, self.kind)
     }
 
     pub fn first(&self) -> Option<&K8sResource> {
@@ -195,21 +225,24 @@ impl <'a> RawView<'a> {
 /// The parent status should be computed from this view, NOT from the _desired_ children returned from your handler.
 #[derive(Debug)]
 pub struct RequestChildren<'a>(&'a SyncRequest);
-impl <'a> RequestChildren<'a> {
-
+impl<'a> RequestChildren<'a> {
     /// Provides a raw view of all the children with the given apiVersion/kind. This is useful if you don't want to
     /// deserialize the resources.
     pub fn of_type_raw<'b: 'a>(&'a self, api_version: &'b str, kind: &'b str) -> RawView<'a> {
         RawView {
             req: self.0,
             api_version,
-            kind
+            kind,
         }
     }
 
     /// Provides a typed view of all the children with the given apiVersion/kind. This view provides typed accessor functions
     /// to return deserialized children
-    pub fn of_type<'b: 'a, T: DeserializeOwned>(&'a self, api_version: &'b str, kind: &'b str) -> TypedView<'a, T> {
+    pub fn of_type<'b: 'a, T: DeserializeOwned>(
+        &'a self,
+        api_version: &'b str,
+        kind: &'b str,
+    ) -> TypedView<'a, T> {
         TypedView::new(&self.0, api_version, kind)
     }
 
@@ -243,7 +276,8 @@ impl Debug for SyncResponse {
             serde_json::to_string_pretty(self)
         } else {
             serde_json::to_string(self)
-        }.map_err(|_| fmt::Error)?;
+        }
+        .map_err(|_| fmt::Error)?;
         write!(f, "SyncResponse: {}", as_string)
     }
 }
@@ -283,16 +317,15 @@ impl Debug for FinalizeResponse {
             serde_json::to_string_pretty(self)
         } else {
             serde_json::to_string(self)
-        }.map_err(|_| fmt::Error)?;
+        }
+        .map_err(|_| fmt::Error)?;
         write!(f, "FinalizeResponse: {}", as_string)
     }
 }
 
-
 /// The main trait that's used to implement your operator. Most operators will only need to implement
 /// the `sync` function.
 pub trait Handler: Send + Sync + 'static {
-
     /// The main logic of an operator is implemented in this function. This function is passed a `&SyncRequest`, which
     /// provides a snapshot of the state of your parent resource and any children that already exist. The `Handler` then
     /// returns a `SyncResponse` that contains the desired child resources and the status to be set on the parent.
@@ -330,7 +363,10 @@ pub trait Handler: Send + Sync + 'static {
 //     }
 // }
 
-impl <F> Handler for F where F: Fn(&SyncRequest) -> Result<SyncResponse, Error> + Send + Sync + 'static {
+impl<F> Handler for F
+where
+    F: Fn(&SyncRequest) -> Result<SyncResponse, Error> + Send + Sync + 'static,
+{
     fn sync(&self, req: &SyncRequest) -> Result<SyncResponse, Error> {
         self(req)
     }

@@ -11,14 +11,18 @@ pub struct Diff<'a> {
     pub desired: &'a Value,
 }
 
-impl <'a> Display for Diff<'a> {
+impl<'a> Display for Diff<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Diff at path: '{}', existing: {}, desired: {}", self.path, self.existing, self.desired)
+        write!(
+            f,
+            "Diff at path: '{}', existing: {}, desired: {}",
+            self.path, self.existing, self.desired
+        )
     }
 }
 
 pub struct Diffs<'a>(Vec<Diff<'a>>);
-impl <'a> Diffs<'a> {
+impl<'a> Diffs<'a> {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -30,14 +34,13 @@ impl <'a> Diffs<'a> {
         self.0.len()
     }
 
-    #[cfg(feature="testkit")]
+    #[cfg(feature = "testkit")]
     pub fn into_vec(self) -> Vec<Diff<'a>> {
         self.0
     }
 }
 
-
-impl <'a> Display for Diffs<'a> {
+impl<'a> Display for Diffs<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.is_empty() {
             f.write_str("<empty>")
@@ -53,7 +56,6 @@ impl <'a> Display for Diffs<'a> {
         }
     }
 }
-
 
 enum Segment<'a> {
     Key(&'a str),
@@ -103,10 +105,15 @@ pub fn compare_values<'a>(existing: &'a Value, desired: &'a Value) -> Diffs<'a> 
     Diffs(diffs)
 }
 
-fn compare<'a>(diffs: &mut Vec<Diff<'a>>, path: &mut Vec<Segment<'a>>, superset: &'a Value, subset: &'a Value) {
+fn compare<'a>(
+    diffs: &mut Vec<Diff<'a>>,
+    path: &mut Vec<Segment<'a>>,
+    superset: &'a Value,
+    subset: &'a Value,
+) {
     match (superset, subset) {
         (Value::Object(ref super_map), Value::Object(ref sub_map)) => {
-                compare_objects(diffs, path, super_map, sub_map);
+            compare_objects(diffs, path, super_map, sub_map);
         }
         (Value::Array(ref super_array), Value::Array(ref sub_array)) => {
             compare_arrays(diffs, path, super_array, sub_array);
@@ -114,17 +121,27 @@ fn compare<'a>(diffs: &mut Vec<Diff<'a>>, path: &mut Vec<Segment<'a>>, superset:
         (a, b) if a != b => {
             diffs.push(diff(&*path, a, b));
         }
-        _ => { }
+        _ => {}
     }
 }
 
-fn compare_objects<'a>(diffs: &mut Vec<Diff<'a>>, path: &mut Vec<Segment<'a>>, existing: &'a JsonObject, desired: &'a JsonObject) {
+fn compare_objects<'a>(
+    diffs: &mut Vec<Diff<'a>>,
+    path: &mut Vec<Segment<'a>>,
+    existing: &'a JsonObject,
+    desired: &'a JsonObject,
+) {
     for (key, desired_val) in desired.iter() {
         check_value(diffs, path, existing, key, desired_val);
     }
 }
 
-fn compare_arrays<'a>(diffs: &mut Vec<Diff<'a>>, path: &mut Vec<Segment<'a>>, existing: &'a Vec<Value>, desired: &'a Vec<Value>) {
+fn compare_arrays<'a>(
+    diffs: &mut Vec<Diff<'a>>,
+    path: &mut Vec<Segment<'a>>,
+    existing: &'a Vec<Value>,
+    desired: &'a Vec<Value>,
+) {
     if is_associative(existing, desired) {
         compare_associative_arrays(diffs, path, existing, desired);
     } else {
@@ -132,8 +149,12 @@ fn compare_arrays<'a>(diffs: &mut Vec<Diff<'a>>, path: &mut Vec<Segment<'a>>, ex
     }
 }
 
-
-fn compare_non_associative_arrays<'a>(diffs: &mut Vec<Diff<'a>>, path: &mut Vec<Segment<'a>>, existing: &'a Vec<Value>, desired: &'a Vec<Value>) {
+fn compare_non_associative_arrays<'a>(
+    diffs: &mut Vec<Diff<'a>>,
+    path: &mut Vec<Segment<'a>>,
+    existing: &'a Vec<Value>,
+    desired: &'a Vec<Value>,
+) {
     for (i, desired_item) in desired.iter().enumerate() {
         path.push(Segment::Index(i));
         if existing.len() > i {
@@ -145,14 +166,22 @@ fn compare_non_associative_arrays<'a>(diffs: &mut Vec<Diff<'a>>, path: &mut Vec<
     }
 }
 
-fn compare_associative_arrays<'a>(diffs: &mut Vec<Diff<'a>>, path: &mut Vec<Segment<'a>>, existing: &'a Vec<Value>, desired: &'a Vec<Value>) {
+fn compare_associative_arrays<'a>(
+    diffs: &mut Vec<Diff<'a>>,
+    path: &mut Vec<Segment<'a>>,
+    existing: &'a Vec<Value>,
+    desired: &'a Vec<Value>,
+) {
     for (i, desired_val) in desired.iter().enumerate() {
         path.push(Segment::Index(i));
         // These are only safe unwraps because we check them in `is_associative`
         let name = desired_val.get("name").unwrap().as_str().unwrap();
 
         let existing_item = existing.iter().find(|e| {
-            e.get("name").and_then(Value::as_str).map(|item_name| item_name == name).unwrap_or(false)
+            e.get("name")
+                .and_then(Value::as_str)
+                .map(|item_name| item_name == name)
+                .unwrap_or(false)
         });
         if let Some(existing_match) = existing_item {
             compare(diffs, path, existing_match, desired_val);
@@ -165,11 +194,19 @@ fn compare_associative_arrays<'a>(diffs: &mut Vec<Diff<'a>>, path: &mut Vec<Segm
 
 fn is_associative(_existing: &Vec<Value>, desired: &Vec<Value>) -> bool {
     desired.iter().all(|v| {
-        v.as_object().map(|o| o.get("name").map(Value::is_string).unwrap_or(false)).unwrap_or(false)
+        v.as_object()
+            .map(|o| o.get("name").map(Value::is_string).unwrap_or(false))
+            .unwrap_or(false)
     })
 }
 
-fn check_value<'a>(diffs: &mut Vec<Diff<'a>>, path: &mut Vec<Segment<'a>>, existing: &'a JsonObject, key: &'a str, value: &'a Value) {
+fn check_value<'a>(
+    diffs: &mut Vec<Diff<'a>>,
+    path: &mut Vec<Segment<'a>>,
+    existing: &'a JsonObject,
+    key: &'a str,
+    value: &'a Value,
+) {
     path.push(Segment::Key(key));
 
     match existing.get(key) {
@@ -204,11 +241,11 @@ fn diff<'a>(path: &Vec<Segment>, existing: &'a Value, desired: &'a Value) -> Dif
 #[cfg(test)]
 mod test {
     use super::*;
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     #[test]
     fn returs_diffs_from_objects() {
-        let existing = json!{{
+        let existing = json! {{
             "key1": {
                 "nested1": "same",
                 "nested2": "existing2",
@@ -216,7 +253,7 @@ mod test {
             "key2": "here",
             "key3": 7,
         }};
-        let desired = json!{{
+        let desired = json! {{
             "key1": {
                 "nested1": "same",
                 "nested2": "desired2",
@@ -253,7 +290,7 @@ mod test {
 
     #[test]
     fn returns_diffs_from_nested_arrays() {
-        let existing = json!{{
+        let existing = json! {{
             "nonAssociative": [
                 {
                     "nonAssociative": [
@@ -269,7 +306,7 @@ mod test {
                 {"name": "name1", "value": "value1existing"},
             ]
         }};
-        let desired = json!{{
+        let desired = json! {{
             "nonAssociative": [
                 {
                     "nonAssociative": [
@@ -299,8 +336,8 @@ mod test {
             Diff {
                 path: ".associative.1.value".to_owned(),
                 existing: &value1existing,
-                desired: &value1desired
-            }
+                desired: &value1desired,
+            },
         ];
         let actual = compare_values(&existing, &desired);
         assert_all_diffs_present(expected, actual);
@@ -309,12 +346,21 @@ mod test {
     fn assert_all_diffs_present(expected: Vec<Diff>, mut actual: Diffs) {
         for expected_diff in expected.iter() {
             if !actual.0.contains(expected_diff) {
-                panic!("Expected to find diff: {} in actual diffs: {}", expected_diff, actual);
+                panic!(
+                    "Expected to find diff: {} in actual diffs: {}",
+                    expected_diff, actual
+                );
             }
         }
         actual.0.retain(|e| !expected.contains(e));
         if !actual.is_empty() {
-            panic!("Expected {} diffs but found {} extra, \nextra_diffs: {}\nexpected: {}", expected.len(), actual.len(), actual, Diffs(expected));
+            panic!(
+                "Expected {} diffs but found {} extra, \nextra_diffs: {}\nexpected: {}",
+                expected.len(),
+                actual.len(),
+                actual,
+                Diffs(expected)
+            );
         }
     }
 }

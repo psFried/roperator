@@ -35,7 +35,6 @@ impl Hash for K8sType {
     }
 }
 
-
 /// Creates a `&'static K8sType` at runtime **by leaking memory**. This is totally fine, as long as it's only
 /// done once on application startup, but you definitely want to avoid repeated calls to define the same type.
 pub fn define_type(api_version: String, kind: String, plural_kind: String) -> &'static K8sType {
@@ -53,16 +52,14 @@ pub fn define_type(api_version: String, kind: String, plural_kind: String) -> &'
 }
 
 impl K8sType {
-
     pub fn as_group_and_version(&self) -> (&str, &str) {
         // TODO: validate the apiVersion string and panic with a helpful message if it's wrong
         match self.api_version.find('/') {
-            Some(slash_idx) => {
-                (&self.api_version[..slash_idx], &self.api_version[(slash_idx + 1)..])
-            }
-            None => {
-                ("", self.api_version)
-            }
+            Some(slash_idx) => (
+                &self.api_version[..slash_idx],
+                &self.api_version[(slash_idx + 1)..],
+            ),
+            None => ("", self.api_version),
         }
     }
 
@@ -77,7 +74,6 @@ impl K8sType {
     pub fn to_type_ref(&self) -> K8sTypeRef<'static> {
         K8sTypeRef(self.api_version, self.kind)
     }
-
 }
 
 impl Display for K8sType {
@@ -139,7 +135,7 @@ macro_rules! def_types {
     }
 }
 
-def_types!{
+def_types! {
     @core => [
         v1 => [
             Namespace ~ namespaces,
@@ -164,7 +160,7 @@ def_types!{
 }
 
 pub mod admissionregistration_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "admissionregistration.k8s.io", [
             v1beta1 => [
                 MutatingWebhookConfiguration ~ mutatingwebhookconfigurations,
@@ -175,7 +171,7 @@ pub mod admissionregistration_k8s_io {
 }
 
 pub mod apiextensions_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "apiextensions.k8s.io", [
             v1beta1 => [
                 CustomResourceDefinition ~ customresourcedefinitions
@@ -185,7 +181,7 @@ pub mod apiextensions_k8s_io {
 }
 
 pub mod apiregistration_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "apiregistration.k8s.io", [
             v1 => [
                 APIService ~ apiservices
@@ -194,7 +190,7 @@ pub mod apiregistration_k8s_io {
     }
 }
 
-def_types!{
+def_types! {
     apps => [
         v1 => [
             ControllerRevision ~ controllerrevisions,
@@ -205,7 +201,7 @@ def_types!{
     ]
 }
 
-def_types!{
+def_types! {
     autoscaling => [
         v1 => [
                 HorizontalPodAutoscaler ~ horizontalpodautoscalers
@@ -214,7 +210,7 @@ def_types!{
 }
 
 pub mod authentication_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "authentication.k8s.io", [
             v1 => [
                 TokenReview ~ tokenreviews
@@ -224,7 +220,7 @@ pub mod authentication_k8s_io {
 }
 
 pub mod authorization_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "authorization.k8s.io", [
             v1 => [
                 LocalSubjectAccessReview ~ localsubjectaccessreviews,
@@ -236,7 +232,7 @@ pub mod authorization_k8s_io {
     }
 }
 
-def_types!{
+def_types! {
     batch => [
         v1 => [
             CronJob ~ cronjobs,
@@ -246,7 +242,7 @@ def_types!{
 }
 
 pub mod certificates_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "certificates.k8s.io", [
             v1beta1 => [
                 CertificateSigningRequest ~ certificatesigningrequests
@@ -256,7 +252,7 @@ pub mod certificates_k8s_io {
 }
 
 pub mod coordination_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "coordination.k8s.io", [
             v1 => [
                 Lease ~ leases
@@ -266,7 +262,7 @@ pub mod coordination_k8s_io {
 }
 
 pub mod extensions {
-    def_types!{
+    def_types! {
         @nogroupmod, "extensions", [
             v1beta1 => [
                 DaemonSet ~ daemonsets,
@@ -281,7 +277,7 @@ pub mod extensions {
 }
 
 pub mod node_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "node.k8s.io", [
             v1beta1 => [
                 RuntimeClass ~ runtimeclasses
@@ -291,7 +287,7 @@ pub mod node_k8s_io {
 }
 
 pub mod policy {
-    def_types!{
+    def_types! {
         @nogroupmod, "policy", [
             v1beta1 => [
                 PodDisruptionBudget ~ poddisruptionbudgets,
@@ -302,7 +298,7 @@ pub mod policy {
 }
 
 pub mod rbac_authorization_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "rbac.authorization.k8s.io", [
             v1 => [
                 ClusterRoleBinding ~ clusterrolebindings,
@@ -315,7 +311,7 @@ pub mod rbac_authorization_k8s_io {
 }
 
 pub mod scheduling_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "scheduling.k8s.io", [
             v1 => [
                 PriorityClass ~ priorityclasses
@@ -325,7 +321,7 @@ pub mod scheduling_k8s_io {
 }
 
 pub mod storage_k8s_io {
-    def_types!{
+    def_types! {
         @nogroupmod, "storage.k8s.io", [
             v1 => [
                 CSIDriver ~ csidrivers,
@@ -336,7 +332,6 @@ pub mod storage_k8s_io {
         ]
     }
 }
-
 
 #[cfg(test)]
 mod test {
@@ -356,4 +351,3 @@ mod test {
         assert_eq!("v1", subject.version());
     }
 }
-

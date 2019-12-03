@@ -1,23 +1,23 @@
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 
-pub mod k8s_types;
-pub mod runner;
-pub mod resource;
 pub mod config;
-pub mod handler;
 pub mod error;
+pub mod handler;
+pub mod k8s_types;
+pub mod resource;
+pub mod runner;
 
-pub use serde_yaml;
-pub use serde_json;
 pub use serde;
+pub use serde_json;
+pub use serde_yaml;
 
 pub mod prelude {
+    pub use crate::config::{ChildConfig, ClientConfig, OperatorConfig, UpdateStrategy};
     pub use crate::error::Error;
-    pub use crate::runner::run_operator;
-    pub use crate::handler::{SyncRequest, SyncResponse, FinalizeResponse, Handler};
+    pub use crate::handler::{FinalizeResponse, Handler, SyncRequest, SyncResponse};
     pub use crate::k8s_types::{self, K8sType};
-    pub use crate::config::{OperatorConfig, ClientConfig, UpdateStrategy, ChildConfig};
     pub use crate::resource::K8sResource;
-    pub use serde::{Serialize, Deserialize};
+    pub use crate::runner::run_operator;
+    pub use serde::{Deserialize, Serialize};
 }
-
