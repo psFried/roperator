@@ -6,7 +6,8 @@ mod metrics;
 
 pub mod testkit;
 
-use crate::resource::{K8sResource, ObjectId, K8sTypeRef};
+use crate::error::Error;
+use crate::resource::{K8sResource, ObjectId, ObjectIdRef, K8sTypeRef};
 use crate::config::{OperatorConfig, ClientConfig, UpdateStrategy};
 use crate::runner::informer::{ResourceMessage, ResourceMonitor, EventType, LabelToIdIndex, UidToIdIndex};
 use crate::runner::reconcile::SyncHandler;
@@ -15,7 +16,6 @@ use client::Client;
 use crate::handler::{SyncRequest, Handler};
 use metrics::Metrics;
 
-use failure::Error;
 use tokio::sync::mpsc::{Sender, Receiver};
 use tokio::prelude::*;
 use tokio::runtime::{Runtime, TaskExecutor};
@@ -25,6 +25,7 @@ use std::time::{Instant, Duration};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Display};
 
 /// A handle to a potentially running operator, which allows for shutting it down
 pub struct OperatorHandle {
@@ -46,6 +47,15 @@ impl OperatorHandle {
         self.running.load(Ordering::Relaxed)
     }
 }
+
+#[derive(Debug)]
+pub struct UnexpectedShutdownError;
+impl Display for UnexpectedShutdownError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("Operator shutdown due to an unexpected error")
+    }
+}
+impl std::error::Error for UnexpectedShutdownError { }
 
 /// Starts the operator and blocks the current thread indefinitely until the operator shuts down due to an error.
 pub fn run_operator(config: OperatorConfig, handler: impl Handler) -> Error {
@@ -83,7 +93,7 @@ pub fn run_operator_with_client_config(config: OperatorConfig, client_config: Cl
     log::warn!("Operator stopped, shutting down runtime");
     runtime.shutdown_now();
     // return an error here, since the operator will never exit under normal circumstances
-    failure::format_err!("Operator shutdown unexpectedly")
+    Box::new(UnexpectedShutdownError)
 }
 
 
@@ -281,7 +291,7 @@ impl OperatorState {
         let parent = match self.get_parent(parent_uid).await? {
             Some(p) => p,
             None => {
-                log::warn!("Cannot sync parent with uid: '{}' because resource has been subsequently deleted", parent_uid);
+                log::info!("Cannot sync parent with uid: '{}' because resource has been subsequently deleted", parent_uid);
                 return Ok(());
             }
         };
@@ -304,6 +314,19 @@ impl OperatorState {
         Ok(())
     }
 
+    async fn create_sync_request(&self, parent: K8sResource) -> Result<SyncRequest, Error> {
+        let children = self.get_all_children(parent.uid()).await?;
+        Ok(SyncRequest {
+            parent,
+            children
+        })
+    }
+
+    async fn get_parent_by_id(&self, parent_id: &ObjectIdRef<'_>) -> Result<Option<K8sResource>, Error> {
+        let parent_lock = self.parents.lock_state().await?;
+        Ok(parent_lock.get_by_id(parent_id))
+    }
+
     async fn get_parent(&self, parent_uid: &str) -> Result<Option<K8sResource>, Error> {
         let parent_lock = self.parents.lock_state().await?;
         Ok(parent_lock.get_by_uid(parent_uid))
@@ -321,7 +344,6 @@ impl OperatorState {
 
         Ok(request_children)
     }
-
 
     /// Tries to receive a whole batch of messages, so that we can consolidate them by parent id
     async fn get_parent_uids_to_update(&mut self, to_sync: &mut HashSet<String>, timeout: Duration) {

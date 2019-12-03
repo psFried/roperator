@@ -194,6 +194,7 @@ impl Client {
         }
     }
 
+    /// gets the requested resource by name and converts a 404 response into a None value
     pub async fn get_resource(&self, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<Option<Value>, Error> {
         let req = request::get_request(&self.0.config, k8s_type, id)?;
         match self.get_response_body::<Value>(req).await {

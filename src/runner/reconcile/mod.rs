@@ -2,6 +2,7 @@ pub(crate) mod compare;
 mod sync;
 mod finalize;
 
+use crate::error::Error;
 use crate::runner::client::{self, Client};
 use crate::runner::RuntimeConfig;
 use crate::runner::informer::ResourceMessage;
@@ -48,7 +49,7 @@ pub enum UpdateError {
     Client(client::Error),
     InvalidHandlerResponse(InvalidResourceError),
     UnknownChildType(String, String),
-    HandlerError(crate::handler::Error),
+    HandlerError(Error),
 }
 
 impl Display for UpdateError {

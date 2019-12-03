@@ -2,17 +2,17 @@ use crate::resource::{K8sResource, ObjectId, ObjectIdRef, InvalidResourceError};
 use crate::k8s_types::K8sType;
 use crate::runner::client::{Client, Error as ClientError, WatchEvent, ApiError, ObjectList};
 use crate::runner::metrics::WatcherMetrics;
+use crate::error::Error;
 
 use serde_json::Value;
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::sync::mpsc::{Sender, error::SendError};
 use tokio::executor::Executor;
-use failure::Error;
 
 use std::sync::{Arc};
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-use std::fmt::{self, Debug};
+use std::fmt::{self, Debug, Display};
 
 
 #[derive(Debug)]
@@ -143,7 +143,7 @@ pub trait ReverseIndex: Send + 'static {
 struct CacheAndIndex<I: ReverseIndex> {
     cache: ResourceCache,
     index: I,
-    error: Option<failure::Error>,
+    error: Option<Error>,
     is_initialized: bool,
 }
 
@@ -151,7 +151,7 @@ impl <I: ReverseIndex> CacheAndIndex<I> {
 
     fn new(index: I) -> Self {
         CacheAndIndex {
-            error: Some(failure::format_err!("Not in sync yet")),
+            error: Some(MonitorBackendErr::StateUnininitialized.into_boxed_error()),
             cache: ResourceCache::new(),
             index,
             is_initialized: false,
@@ -267,7 +267,7 @@ impl <I: ReverseIndex> ResourceMonitor<I> {
         if let Some(err) = lock.error.take() {
             Err(err)
         } else if !lock.is_initialized {
-            Err(failure::format_err!("Resource state is uninitialized"))
+            Err(MonitorBackendErr::StateUnininitialized.into_boxed_error())
         } else {
             Ok(ResourceState(lock))
         }
@@ -283,17 +283,37 @@ enum MonitorBackendErr {
     ResourceVersionExpired,
     InvalidResource(InvalidResourceError),
     Api(ApiError),
+    StateUnininitialized,
 }
 
-impl MonitorBackendErr {
-    fn into_failure_error(self) -> Error {
+impl Display for MonitorBackendErr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            MonitorBackendErr::SendErr => failure::format_err!("Sender channel closed"),
-            MonitorBackendErr::ClientErr(e) => e.into(),
-            MonitorBackendErr::ResourceVersionExpired => failure::format_err!("ResourceVersion is expired"),
-            MonitorBackendErr::InvalidResource(e) => failure::format_err!("Invalid resource: {}", e),
-            MonitorBackendErr::Api(e) => e.into(),
+            MonitorBackendErr::SendErr => f.write_str("Sender channel closed"),
+            MonitorBackendErr::StateUnininitialized => f.write_str("Resource cache has not been initialized or may be temporarily recovering from an error"),
+            MonitorBackendErr::ClientErr(err) => write!(f, "Client Error: {}", err),
+            MonitorBackendErr::ResourceVersionExpired => f.write_str("Resource Version has expired, watcher is out of sync"),
+            MonitorBackendErr::InvalidResource(e) => write!(f, "Invalid resource returned from api server: {}", e),
+            MonitorBackendErr::Api(e) => write!(f, "Watcher received api error: {}", e)
         }
+    }
+}
+
+impl std::error::Error for MonitorBackendErr {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            MonitorBackendErr::ClientErr(err) => Some(err),
+            MonitorBackendErr::InvalidResource(e) => Some(e),
+            MonitorBackendErr::Api(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+
+impl MonitorBackendErr {
+    fn into_boxed_error(self) -> Error {
+        Box::new(self)
     }
 
     fn is_resource_version_expired(&self) -> bool {
@@ -417,7 +437,7 @@ impl <I: ReverseIndex> ResourceMonitorBackend<I> {
         let is_send_err = error.is_send_err();
         log::error!("Error in monitor for type: {:?}, err: {:?}", self.k8s_type, error);
         let mut lock = self.cache_and_index.lock().await;
-        lock.error = Some(error.into_failure_error());
+        lock.error = Some(error.into_boxed_error());
         lock.is_initialized = false;
 
         if !is_http_410 {

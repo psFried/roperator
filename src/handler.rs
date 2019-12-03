@@ -1,4 +1,5 @@
 use crate::resource::{K8sResource, ObjectIdRef, K8sTypeRef};
+use crate::error::Error;
 
 use serde_json::{Value};
 use serde::de::DeserializeOwned;
@@ -287,21 +288,6 @@ impl Debug for FinalizeResponse {
     }
 }
 
-/// Trait for errors that can be returned from a Handler function. This just enforces all of the
-/// bounds we need in order to convert the errors into trait objects and to send them between threads.
-pub trait HandlerError: std::error::Error + Send + 'static {}
-impl <T> HandlerError for T where T: std::error::Error + Send + 'static {}
-
-/// An error that can be returned from a `Handler` function. We use trait objects
-/// for handler errors to keep the interfaces clean and simple. Most common error
-/// types can be easily converted into `Box<dyn HandlerError>` without any trouble.
-pub type Error = Box<dyn HandlerError>;
-
-impl <T> From<T> for Error where T: HandlerError {
-    fn from(e: T) -> Error {
-        Box::new(e)
-    }
-}
 
 /// The main trait that's used to implement your operator. Most operators will only need to implement
 /// the `sync` function.
