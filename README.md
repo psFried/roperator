@@ -18,6 +18,9 @@ First add the dependency:
 # Cargo.toml
 [dependencies]
 roperator = "*"
+
+[dev-dependencies]
+roperator = { version = "*", features = ["testkit"] }
 ```
 
 Then, in your `fn main()`:

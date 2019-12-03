@@ -237,6 +237,8 @@ impl Debug for ResourceMessage {
 pub struct ResourceState<'a, I: ReverseIndex>(MutexGuard<'a, CacheAndIndex<I>>);
 
 impl <'a, I: ReverseIndex> ResourceState<'a, I> {
+
+    #[cfg(feature="testkit")]
     pub fn get_by_id(&self, id: &ObjectIdRef<'_>) -> Option<K8sResource> {
         self.0.cache.get_copy(id)
     }

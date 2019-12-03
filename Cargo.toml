@@ -41,3 +41,10 @@ serde_derive = "1.0.101"
 k8s-openapi = { version = "0.6.0", default-features = false, features = ["v1_15"] }
 env_logger = "*"
 
+[features]
+default = []
+testkit = []
+
+[[test]]
+name = "integration_tests"
+required-features = ["testkit"]

@@ -4,10 +4,14 @@ mod client;
 mod server;
 mod metrics;
 
+#[cfg(feature="testkit")]
 pub mod testkit;
 
+#[cfg(feature="testkit")]
+use crate::resource::ObjectIdRef;
+
 use crate::error::Error;
-use crate::resource::{K8sResource, ObjectId, ObjectIdRef, K8sTypeRef};
+use crate::resource::{K8sResource, ObjectId, K8sTypeRef};
 use crate::config::{OperatorConfig, ClientConfig, UpdateStrategy};
 use crate::runner::informer::{ResourceMessage, ResourceMonitor, EventType, LabelToIdIndex, UidToIdIndex};
 use crate::runner::reconcile::SyncHandler;
@@ -275,10 +279,12 @@ impl OperatorState {
         }
     }
 
+    #[cfg(feature="testkit")]
     fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
     }
 
+    #[cfg(feature="testkit")]
     fn is_any_update_in_progress(&self) -> bool {
         !self.in_progress_updates.is_empty()
     }
@@ -295,13 +301,14 @@ impl OperatorState {
                 return Ok(());
             }
         };
-        let children = self.get_all_children(parent_uid).await?;
-        log::info!("Starting sync request for parent: '{}/{}' with uid: '{}'", parent.namespace().unwrap_or(""), parent.name(), parent.uid());
 
         let parent_id = parent.get_object_id().into_owned();
+        log::info!("Starting sync request for parent: '{}' with uid: '{}'", parent_id, parent.uid());
+
+        let request = self.create_sync_request(parent).await?;
         self.in_progress_updates.insert(parent_uid.to_owned(), InProgressUpdate::new(parent_id));
 
-        let request = SyncRequest { parent: parent, children };
+
         let handler = SyncHandler {
             sender: self.sender.clone(),
             request,
@@ -322,6 +329,7 @@ impl OperatorState {
         })
     }
 
+    #[cfg(feature="testkit")]
     async fn get_parent_by_id(&self, parent_id: &ObjectIdRef<'_>) -> Result<Option<K8sResource>, Error> {
         let parent_lock = self.parents.lock_state().await?;
         Ok(parent_lock.get_by_id(parent_id))

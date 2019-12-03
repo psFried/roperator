@@ -63,6 +63,7 @@ pub fn patch_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &Obje
     Ok(req)
 }
 
+#[cfg(feature="testkit")]
 pub fn get_request(client_config: &ClientConfig, k8s_type: &K8sType, id: &ObjectIdRef<'_>) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
 

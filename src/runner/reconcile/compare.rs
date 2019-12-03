@@ -30,6 +30,7 @@ impl <'a> Diffs<'a> {
         self.0.len()
     }
 
+    #[cfg(feature="testkit")]
     pub fn into_vec(self) -> Vec<Diff<'a>> {
         self.0
     }

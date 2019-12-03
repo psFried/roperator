@@ -440,6 +440,7 @@ impl Handler for InstrumentedHandler {
 
 }
 
+    // TODO: add some sort of "required_quiet_period" parameter so that we can detect hot-loop scenarios
 async fn do_reconciliation_run(state: &mut OperatorState, parents_needing_sync: &mut HashSet<String>, handler: &HandlerRef, instrumented_handler: &InstrumentedHandler, max_timeout: Duration) -> Result<(), Error> {
     let mut timeout = max_timeout.min(Duration::from_millis(50));
     let start = Instant::now();
@@ -463,11 +464,7 @@ async fn do_reconciliation_run(state: &mut OperatorState, parents_needing_sync: 
             return Ok(());
         }
     }
-    let records = instrumented_handler.clone_records();
-    Err(Box::new(ReconciliationIncompleteError {
-        records,
-        timeout: max_timeout,
-    }) as Error)
+    Ok(())
 }
 
 #[derive(Debug)]
