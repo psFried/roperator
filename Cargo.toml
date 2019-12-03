@@ -8,7 +8,7 @@ repository = "https://github.com/psFried/roperator"
 readme = "README.md"
 keywords = ["kubernetes", "k8s", "operator"]
 categories = ["api-bindings", "config"]
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 hyper = { version = "=0.13.0-alpha.4", features = ["unstable-stream"]}
