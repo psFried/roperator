@@ -6,7 +6,7 @@ use crate::error::Error;
 use crate::runner::client::{self, Client};
 use crate::runner::RuntimeConfig;
 use crate::runner::informer::ResourceMessage;
-use crate::resource::{InvalidResourceError, ObjectIdRef};
+use crate::resource::{InvalidResourceError, ObjectIdRef, K8sResource};
 use crate::handler::{SyncRequest, Handler};
 
 use tokio::sync::mpsc::Sender;
@@ -75,10 +75,12 @@ impl From<InvalidResourceError> for UpdateError {
     }
 }
 
-pub(crate) async fn update_status_if_different(parent_id: &ObjectIdRef<'_>, parent_resource_version: &str, client: &Client, runtime_config: &RuntimeConfig, current_gen: i64, old_status: Option<&Value>, mut new_status: Value) -> Result<(), UpdateError> {
-    if new_status.is_null() {
-        return Ok(());
-    }
+pub(crate) async fn update_status_if_different(existing_parent: &K8sResource, client: &Client, runtime_config: &RuntimeConfig, mut new_status: Value) -> Result<(), UpdateError> {
+    let parent_id = existing_parent.get_object_id();
+    let old_status = existing_parent.status();
+    let parent_resource_version = existing_parent.get_resource_version();
+    let current_gen = existing_parent.generation();
+
     if let Some(s) = new_status.as_object_mut() {
         s.insert("observedGeneration".to_owned(), current_gen.into());
     }
@@ -111,7 +113,15 @@ pub(crate) async fn update_status_if_different(parent_id: &ObjectIdRef<'_>, pare
         "status": new_status,
     });
     if should_update {
-        client.update_status(&*runtime_config.parent_type, parent_id, &new_status).await?;
+        client.update_status(&*runtime_config.parent_type, &parent_id, &new_status).await?;
     }
     Ok(())
+}
+
+fn does_finalizer_exist(resource: &Value, runtime_config: &RuntimeConfig) -> bool {
+    let finalizer_name = runtime_config.operator_name.as_str();
+    resource.pointer("/metadata/finalizers")
+            .and_then(Value::as_array)
+            .map(|array| array.iter().any(|name| name.as_str() == Some(finalizer_name)))
+            .unwrap_or(false)
 }

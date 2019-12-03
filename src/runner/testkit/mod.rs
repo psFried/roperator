@@ -173,6 +173,26 @@ impl TestKit {
         // if we break from the loop then the result must be None
     }
 
+    pub fn assert_resource_exists_eventually(&mut self, k8s_type: &K8sType, id: &ObjectIdRef<'_>, timeout: Duration) {
+        let start_time = Instant::now();
+
+        let mut result = self.get_resource(k8s_type, id).expect("Failed to get child resource");
+        while result.is_none() {
+            if start_time.elapsed() > timeout {
+                panic!("Timed out waiting for child resource exist, type: {}, id: {}", k8s_type, id);
+            } else {
+                // we need to run the reconciliation so that the operator can remove itself from the paretn finalizer
+                // list if needed
+                let remaining = timeout.checked_sub(start_time.elapsed())
+                        .expect("Timed out waiting for child resource deletion to be observed");
+                self.reconcile_and_assert_success(remaining.min(Duration::from_millis(250)));
+
+                result = self.get_resource(k8s_type, id).expect("Failed to get child resource");
+            }
+        }
+        // result must be some
+    }
+
     pub fn get_current_state_for_parent(&mut self, parent_id: &ObjectIdRef<'_>) -> Result<SyncRequest, Error> {
         let TestKit {ref state, ref mut runtime, ..} = self;
 

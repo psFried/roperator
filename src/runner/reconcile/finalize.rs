@@ -3,22 +3,13 @@ use crate::runner::{RuntimeConfig, duration_to_millis};
 use crate::runner::informer::{ResourceMessage, EventType};
 use crate::handler::{SyncRequest, FinalizeResponse, Handler};
 use crate::resource::K8sResource;
-use super::{UpdateError, update_status_if_different, SyncHandler};
+use super::{UpdateError, update_status_if_different, does_finalizer_exist, SyncHandler};
 
 use serde_json::Value;
 
 use std::time::{Instant, Duration};
 use std::sync::Arc;
 
-
-fn get_index_of_parent_finalizer(req: &SyncRequest, runtime_config: &RuntimeConfig) -> Option<usize> {
-    let finalizer_name = runtime_config.operator_name.as_str();
-    req.parent.as_ref().pointer("/metadata/finalizers")
-            .and_then(Value::as_array)
-            .and_then(|array| {
-                array.iter().position(|name| name.as_str() == Some(finalizer_name))
-            })
-}
 
 pub(crate) async fn handle_finalize(handler: SyncHandler) {
     let SyncHandler { mut sender, request, handler, client, runtime_config, parent_index_key, } = handler;
@@ -51,8 +42,7 @@ pub(crate) async fn handle_finalize(handler: SyncHandler) {
 
 
 async fn get_finalize_result(request: SyncRequest, handler: Arc<dyn Handler>, client: Client, runtime_config: &RuntimeConfig) -> Result<bool, UpdateError> {
-    let parent_finalizer_index = get_index_of_parent_finalizer(&request, runtime_config);
-    if parent_finalizer_index.is_none() {
+    if !does_finalizer_exist(&request.parent, runtime_config) {
         return Ok(false);
     }
 
@@ -67,18 +57,14 @@ async fn get_finalize_result(request: SyncRequest, handler: Arc<dyn Handler>, cl
     let FinalizeResponse{ finalized, status } = finalize_result?;
 
     let request: SyncRequest = req;
-    let current_gen = request.parent.generation();
-    let parent_resource_version = request.parent.get_resource_version();
-    let old_status = request.parent.status();
     let parent_id = request.parent.get_object_id();
-
-    update_status_if_different(&parent_id, parent_resource_version, &client, runtime_config, current_gen, old_status, status).await?;
 
     if finalized {
         log::info!("handler response indicates that parent: {} has been finalized", parent_id);
         remove_finalizer(&client, runtime_config, &request.parent).await?;
     } else {
         log::info!("handler response indicates that parent: {} has not been finalized. Will re-try later", parent_id);
+        update_status_if_different(&request.parent, &client, runtime_config, status).await?;
         tokio::timer::delay_for(Duration::from_secs(3)).await;
     }
 

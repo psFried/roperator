@@ -20,7 +20,7 @@ impl MergeStrategy {
     fn content_type(&self) -> &'static str {
         match *self {
             MergeStrategy::Json => "application/json-patch+json",
-            MergeStrategy::JsonMerge => "application/json-merge+json",
+            MergeStrategy::JsonMerge => "application/merge-patch+json",
             MergeStrategy::StrategicMerge => "application/strategic-merge-patch+json",
         }
     }
@@ -48,6 +48,26 @@ impl Patch {
         });
         Patch {
             value: patch,
+            merge_strategy: MergeStrategy::JsonMerge,
+        }
+    }
+
+    pub fn add_finalizer(resource: &K8sResource, finalizer: &str) -> Patch {
+        let mut finalizers = resource.as_ref().pointer("/metadata/finalizers")
+                .and_then(Value::as_array)
+                .map(|finalizers| finalizers.clone())
+                .unwrap_or(Vec::new());
+        finalizers.push(Value::String(finalizer.to_string()));
+        let value = serde_json::json!({
+            "metadata": {
+                "namespace": resource.get_object_id().namespace(),
+                "name": resource.get_object_id().name(),
+                "resourceVersion": resource.get_resource_version(),
+                "finalizers": finalizers,
+            }
+        });
+        Patch {
+            value,
             merge_strategy: MergeStrategy::JsonMerge,
         }
     }

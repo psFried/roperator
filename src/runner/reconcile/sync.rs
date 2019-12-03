@@ -6,7 +6,7 @@ use crate::resource::{K8sResource, ObjectId, InvalidResourceError, JsonObject, o
 use crate::runner::informer::{ResourceMessage, EventType};
 use crate::runner::{duration_to_millis, RuntimeConfig, ChildRuntimeConfig};
 use crate::runner::reconcile::compare::{compare_values};
-use crate::runner::reconcile::{SyncHandler, UpdateError, update_status_if_different};
+use crate::runner::reconcile::{SyncHandler, UpdateError, update_status_if_different, does_finalizer_exist};
 
 use tokio::timer::delay_for;
 use serde_json::{json, Value};
@@ -16,8 +16,6 @@ use std::time::Instant;
 use std::collections::HashSet;
 
 
-
-
 pub(crate) async fn handle_sync(handler: SyncHandler) {
     let SyncHandler { mut sender, request, handler, client, runtime_config, parent_index_key } = handler;
     let parent_id = request.parent.get_object_id().into_owned();
@@ -25,16 +23,23 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
     let start_time = Instant::now();
     let result = private_handle_sync(start_time, request, handler, client, &*runtime_config).await;
 
-    let retry = if let Err(err) = result {
-        runtime_config.metrics.parent_sync_error(&parent_id);
-        log::error!("Error while syncing parent: {}: {:?}", parent_id, err);
-        // we'll delay for a while before sending the message that we've finished so that we can
-        // prevent the main loop from re-trying too soon. Eventually we should implement a backoff
-        delay_for(std::time::Duration::from_secs(10)).await;
-        true
-    } else {
-        log::info!("Finished sync for parent: {}", parent_id);
-        false
+    let retry = match result {
+        Ok(true) => {
+            log::info!("Observed new parent: {} and added '{}' as a finalizer", parent_id, runtime_config.operator_name);
+            true
+        },
+        Ok(false) => {
+            log::info!("Finished sync for parent: {}", parent_id);
+            false
+        }
+        Err(err) => {
+            runtime_config.metrics.parent_sync_error(&parent_id);
+            log::error!("Error while syncing parent: {}: {:?}", parent_id, err);
+            // we'll delay for a while before sending the message that we've finished so that we can
+            // prevent the main loop from re-trying too soon. Eventually we should implement a backoff
+            delay_for(std::time::Duration::from_secs(10)).await;
+            true
+        }
     };
     let message = ResourceMessage {
         event_type: EventType::UpdateOperationComplete { retry },
@@ -45,16 +50,26 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
     let _ = sender.send(message).await;
 }
 
-async fn private_handle_sync(start_time: Instant, request: SyncRequest, handler: Arc<dyn Handler>, client: Client, runtime_config: &RuntimeConfig) -> Result<(), UpdateError> {
-    let (request, sync_result) = {
-        tokio_executor::blocking::run(move || {
-            let result = handler.sync(&request);
-            log::debug!("finished invoking handler for parent: {} in {}ms", request.parent.get_object_id(), duration_to_millis(start_time.elapsed()));
-            (request, result)
-        }).await
-    };
-    let response = sync_result.map_err(|e| UpdateError::HandlerError(e))?;
-    update_all(request, response, client, runtime_config).await
+/// Performs the whole sync, including invoking the Handler, updating the parent status, and updating any children that need it.
+/// If our operator isn't in the list of parent finalizers, then we'll just add it to the list and then move on without even invoking the handler
+/// this is because adding the finalizer will cause the resourceVersion of the parent to be incremented, which will mean that our update to the
+/// status would fail due to the conflicting resource version, at least until we observe that version
+async fn private_handle_sync(start_time: Instant, request: SyncRequest, handler: Arc<dyn Handler>, client: Client, runtime_config: &RuntimeConfig) -> Result<bool, UpdateError> {
+    if !does_finalizer_exist(&request.parent, runtime_config) {
+        add_finalizer_to_parent(&request.parent, &client, runtime_config).await?;
+        Ok(true)
+    } else {
+        let (request, sync_result) = {
+            tokio_executor::blocking::run(move || {
+                let result = handler.sync(&request);
+                log::debug!("finished invoking handler for parent: {} in {}ms", request.parent.get_object_id(), duration_to_millis(start_time.elapsed()));
+                (request, result)
+            }).await
+        };
+        let response = sync_result.map_err(|e| UpdateError::HandlerError(e))?;
+        update_all(request, response, client, runtime_config).await?;
+        Ok(false)
+    }
 }
 
 
@@ -62,9 +77,7 @@ async fn update_all(request: SyncRequest, handler_response: SyncResponse, client
     let start_time = Instant::now();
     let SyncResponse {status, children} = handler_response;
     let parent_id = request.parent.get_object_id().into_owned();
-    let parent_resource_version = request.parent.get_resource_version();
-    let current_generation = request.parent.generation();
-    update_status_if_different(&parent_id, parent_resource_version, &client, runtime_config, current_generation, request.parent.status(), status).await?;
+    update_status_if_different(&request.parent, &client, runtime_config, status).await?;
     log::debug!("Successfully updated status for parent: {} in {}ms", parent_id, duration_to_millis(start_time.elapsed()));
     let child_ids = update_children(&client, runtime_config, &request, children).await?;
     log::debug!("Successfully updated all {} children of parent: {} in {}ms", child_ids.len(), parent_id,
@@ -73,6 +86,11 @@ async fn update_all(request: SyncRequest, handler_response: SyncResponse, client
     // now that all the child updates have completed successfully, we'll delete any children that are no longer desired
     delete_undesired_children(&client, runtime_config, &child_ids, &request).await?;
     Ok(())
+}
+
+async fn add_finalizer_to_parent(parent: &K8sResource, client: &Client, runtime_config: &RuntimeConfig) -> Result<(), client::Error> {
+    let patch = crate::runner::client::Patch::add_finalizer(parent, runtime_config.operator_name.as_str());
+    client.patch_resource(runtime_config.parent_type, &parent.get_object_id(), &patch).await
 }
 
 async fn delete_undesired_children(client: &Client, runtime_config: &RuntimeConfig, desired_children: &HashSet<ObjectId>, sync_request: &SyncRequest) -> Result<(), client::Error> {

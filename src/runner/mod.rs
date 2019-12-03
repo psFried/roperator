@@ -353,14 +353,16 @@ impl OperatorState {
         Ok(request_children)
     }
 
-    /// Tries to receive a whole batch of messages, so that we can consolidate them by parent id
-    async fn get_parent_uids_to_update(&mut self, to_sync: &mut HashSet<String>, timeout: Duration) {
+    /// Tries to receive a whole batch of messages, so that we can consolidate them by parent id.
+    /// The `max_timeout` is treated as a soft limit, which may be exceeded by a bit in case there are
+    /// tons of messages to process.
+    async fn get_parent_uids_to_update(&mut self, to_sync: &mut HashSet<String>, max_timeout: Duration) {
         let starting_to_sync_len = to_sync.len();
         let start_time = Instant::now();
         let mut first_receive_time = start_time;
         // the initial timeout will be pretty long, but as soon as we receive the first message
         // we'll start to use a much shorter timeout for receiving subsequent messages
-        let mut timeout = timeout;
+        let mut timeout = max_timeout;
         let mut total_messages: usize = 0;
 
         while let Some(message) = self.recv_next(timeout).await {
@@ -371,10 +373,17 @@ impl OperatorState {
             log::trace!("Received: {:?}", message);
             self.handle_received_message(message, to_sync);
 
-            // if we've been going for over a second, then we'll use a super short timeout so that
+            // if we've been receiving messages for a while, then we'll use a super short timeout so that
             // we can start syncing as soon as possible
-            let elapsed = first_receive_time.elapsed();
-            timeout = Duration::from_millis(500).min(timeout).checked_sub(elapsed).unwrap_or(Duration::from_millis(1));
+            let elapsed_since_first_recv = first_receive_time.elapsed();
+            let new_timeout = if (total_messages > 0) && (elapsed_since_first_recv > Duration::from_millis(500)) {
+                Duration::from_millis(1)
+            } else {
+                max_timeout.checked_sub(start_time.elapsed()).unwrap_or(Duration::from_millis(1))
+                        .min(Duration::from_millis(500)) // clamp to 500ms since we've already started receiving
+                        .min(max_timeout) // clamp to max_timeout just in case that value was already very short
+            };
+            timeout = new_timeout;
         }
         let elapsed_millis = duration_to_millis(start_time.elapsed());
         let new_to_sync = to_sync.len() - starting_to_sync_len;
