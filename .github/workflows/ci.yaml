@@ -19,6 +19,7 @@ jobs:
         run: |
           export KUBECONFIG="$(kind get kubeconfig-path)"
           kubectl cluster-info
+          kubectl apply -f tests/resources/
           cargo test --features testkit
 
   fmt:
