@@ -8,7 +8,7 @@ use std::fmt::{self, Display};
 use std::time::Duration;
 
 fn make_client_config(operator_name: &str) -> ClientConfig {
-    if let Some(conf) = ClientConfig::from_service_account(operator_name).ok() {
+    if let Ok(conf) = ClientConfig::from_service_account(operator_name) {
         conf
     } else {
         ClientConfig::from_kubeconfig(operator_name).expect("Failed to create client configuration")
@@ -186,7 +186,7 @@ fn operator_retries_finalize_when_response_finalized_is_false() {
             create_child_handler(request)
         }
 
-        fn finalize(&self, request: &SyncRequest) -> Result<FinalizeResponse, Error> {
+        fn finalize(&self, _request: &SyncRequest) -> Result<FinalizeResponse, Error> {
             let num_calls = self.0.fetch_add(1, Ordering::SeqCst);
             let status = json!({
                 "finalizeCalls": num_calls,

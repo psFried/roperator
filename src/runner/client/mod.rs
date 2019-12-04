@@ -594,7 +594,7 @@ mod test {
         let expected = ["line1", "line2", "line3", "longline4", "line5"];
 
         runtime.block_on(async move {
-            for i in 0usize..5usize {
+            for expected_line in expected.iter() {
                 let mut line = lines
                     .next()
                     .await
@@ -603,7 +603,7 @@ mod test {
                 let mut string = String::new();
                 line.read_to_string(&mut string)
                     .expect("failed to read to string");
-                assert_eq!(expected[i], string.as_str());
+                assert_eq!(*expected_line, string.as_str());
                 assert!(line.is_empty());
             }
         });
