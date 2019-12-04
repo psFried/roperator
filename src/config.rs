@@ -113,14 +113,26 @@ pub enum Credentials {
     },
 }
 
+/// Configuration for how to connect to the Kubernetes API server and authenticate. This configuration
+/// can typically be created from either a service account or a kubeconfig file using one of the provided
+/// functions, but you may also create configurations manually.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientConfig {
+    /// The http(s) endpoint of the api server, including the scheme and port
     pub api_server_endpoint: String,
+    /// The credentials for authenticating with the api server
     pub credentials: Credentials,
+    // Certificate for the Certificate Authority that signed the Kubernetes API server certificate
     pub ca_data: Option<CAData>,
+    /// The user-agent string to include in requests to the api server. This typically doesn't affect
+    /// the fuctioning of the operator, but it can be useful when looking through api server logs
     pub user_agent: String,
+    /// Escape hatch for turning off ssl certificate validation **in test environments only**. Don't
+    /// set to `true` in production. Don't be _that_ person.
     pub verify_ssl_certs: bool,
+    /// Optional user to impersonate
     pub impersonate: Option<String>,
+    /// optional list of groups to add when impersonating a user. Ignored if `impersonate` is empty.
     pub impersonate_groups: Vec<String>,
 }
 

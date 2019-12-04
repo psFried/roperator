@@ -23,8 +23,7 @@ roperator = "*"
 roperator = { version = "*", features = ["testkit"] }
 ```
 
-### OperatorConfiguration
-
+### Operator Configuration
 
 The first thing you'll need is a configuration object that specifies the relationships between the CRD that will act as the _parent_ and the types of resources that may be created as _children_.
 
@@ -92,6 +91,15 @@ fn finalize(&self, request: &SyncRequest) -> Result<FinalizeResponse, Error> {
 }
 ```
 
+## The Path to 1.0
+
+Roperator is still young, and not yet "production grade". The APIs will also be unstable until we reach a 1.0 milestone. It would really benefit from feedback from early adopters, so please file an issue or submit a Pull Request. The goal is to quickly identify the things that need to be addressed before the 1.0 release, and focus on producing a production grade 1.0 release as soon as is reasonable.
+
+Some of the things that will definitely need addressed prior to the 1.0 release are:
+
+- Build out a much more complete test suite
+- Settle on a more consistent and simple API for the `TestKit`
+- Settle on a simpler API for running multiple operators in the same process
 
 ### License
 
