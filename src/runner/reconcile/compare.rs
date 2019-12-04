@@ -1,3 +1,5 @@
+#![allow(clippy::ptr_arg)]
+
 use serde_json::Value;
 
 use std::fmt::{self, Display, Write};
@@ -192,7 +194,7 @@ fn compare_associative_arrays<'a>(
     }
 }
 
-fn is_associative(_existing: &Vec<Value>, desired: &Vec<Value>) -> bool {
+fn is_associative(_existing: &[Value], desired: &[Value]) -> bool {
     desired.iter().all(|v| {
         v.as_object()
             .map(|o| o.get("name").map(Value::is_string).unwrap_or(false))
@@ -220,7 +222,7 @@ fn check_value<'a>(
     path.pop();
 }
 
-fn diff<'a>(path: &Vec<Segment>, existing: &'a Value, desired: &'a Value) -> Diff<'a> {
+fn diff<'a>(path: &[Segment], existing: &'a Value, desired: &'a Value) -> Diff<'a> {
     let mut p = String::with_capacity(8);
     for s in path.iter() {
         p.push('.');

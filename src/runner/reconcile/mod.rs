@@ -4,7 +4,7 @@ mod sync;
 
 use crate::error::Error;
 use crate::handler::{Handler, SyncRequest};
-use crate::resource::{InvalidResourceError, K8sResource, ObjectIdRef};
+use crate::resource::{InvalidResourceError, K8sResource};
 use crate::runner::client::{self, Client};
 use crate::runner::informer::ResourceMessage;
 use crate::runner::RuntimeConfig;

@@ -5,8 +5,6 @@ use crate::runner::client::{Client, Patch};
 use crate::runner::informer::{EventType, ResourceMessage};
 use crate::runner::{duration_to_millis, RuntimeConfig};
 
-use serde_json::Value;
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

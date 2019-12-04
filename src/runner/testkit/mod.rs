@@ -611,7 +611,7 @@ impl InstrumentedHandler {
     fn wrap(wrapped: impl Handler) -> (InstrumentedHandler, HandlerRef) {
         let handler_ref = Arc::new(wrapped);
         let handler = InstrumentedHandler {
-            wrapped: handler_ref.clone(),
+            wrapped: handler_ref,
             records: Arc::new(RwLock::new(HashMap::new())),
         };
 
@@ -658,7 +658,7 @@ impl Handler for InstrumentedHandler {
         let mut records_lock = records.write().unwrap();
         let record = records_lock
             .entry(parent_id)
-            .or_insert_with(|| SyncRecord::default());
+            .or_insert_with(SyncRecord::default);
         record.sync_started(req);
 
         let result = wrapped.sync(req);
@@ -676,7 +676,7 @@ impl Handler for InstrumentedHandler {
         let mut records_lock = records.write().unwrap();
         let record = records_lock
             .entry(parent_id)
-            .or_insert_with(|| SyncRecord::default());
+            .or_insert_with(SyncRecord::default);
         record.finalize_started(req);
 
         let result = wrapped.finalize(req);
@@ -871,8 +871,8 @@ fn diff_resources(actual: Value, expected: &Value) -> Option<Diff> {
         None
     } else {
         Some(Diff {
+            actual,
             expected: expected.clone(),
-            actual: actual,
             different_paths: paths,
         })
     }

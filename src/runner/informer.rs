@@ -62,7 +62,7 @@ impl ReverseIndex for LabelToIdIndex {
     }
 
     fn insert(&mut self, key: &str, res: &K8sResource) {
-        let set = self.entries.entry(key.to_owned()).or_insert(HashSet::new());
+        let set = self.entries.entry(key.to_owned()).or_insert_with(HashSet::new);
         let id = res.get_object_id();
         if !set.contains(&id) {
             set.insert(id.into_owned());
@@ -321,14 +321,14 @@ impl MonitorBackendErr {
 
     fn is_resource_version_expired(&self) -> bool {
         match self {
-            &MonitorBackendErr::ResourceVersionExpired => true,
+            MonitorBackendErr::ResourceVersionExpired => true,
             _ => false,
         }
     }
 
     fn is_send_err(&self) -> bool {
         match self {
-            &MonitorBackendErr::SendErr => true,
+            MonitorBackendErr::SendErr => true,
             _ => false,
         }
     }
@@ -408,6 +408,7 @@ pub fn start_parent_monitor(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_monitor<I: ReverseIndex>(
     executor: &mut impl Executor,
     index: I,

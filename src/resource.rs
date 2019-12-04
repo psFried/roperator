@@ -176,7 +176,7 @@ pub fn object_id(json: &Value) -> Option<ObjectIdRef> {
     str_value(json, "/metadata/name").map(|name| ObjectIdRef::new(namespace, name))
 }
 
-pub fn type_ref<'a>(json: &'a Value) -> Option<K8sTypeRef<'a>> {
+pub fn type_ref(json: &Value) -> Option<K8sTypeRef<'_>> {
     str_value(json, "/apiVersion")
         .and_then(|api_version| str_value(json, "/kind").map(|kind| K8sTypeRef(api_version, kind)))
 }

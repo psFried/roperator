@@ -51,7 +51,7 @@ impl std::error::Error for KubeConfigError {}
 fn get_kubeconfig_path() -> Result<PathBuf, KubeConfigError> {
     std::env::var("KUBECONFIG")
         .ok()
-        .map(|env_path| PathBuf::from(env_path))
+        .map(PathBuf::from)
         .or_else(|| {
             home_dir().map(|mut home| {
                 home.push(".kube/config");
@@ -133,7 +133,7 @@ fn get_credentials(user: &UserInfo) -> Result<Credentials, KubeConfigError> {
         return Ok(Credentials::Header(format!("Basic {}", encoded)));
     }
     if let Some(exec) = user.exec.as_ref() {
-        return get_exec_token(exec).map(|token| Credentials::Header(token));
+        return get_exec_token(exec).map(Credentials::Header);
     }
 
     if let Some(certificate) = user.client_certificate_data.as_ref() {

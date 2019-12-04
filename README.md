@@ -100,6 +100,7 @@ Roperator is still young, and not yet "production grade". The APIs will also be 
 Some of the things that will definitely need addressed prior to the 1.0 release are:
 
 - Build out a much more complete test suite
+- Polish up the API for accessing child resources from a `SyncRequest`
 - Settle on a more consistent and simple API for the `TestKit`
 - Settle on a simpler API for running multiple operators in the same process
 

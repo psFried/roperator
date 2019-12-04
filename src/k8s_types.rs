@@ -1,7 +1,6 @@
 use crate::resource::K8sTypeRef;
 
 use std::fmt::{self, Display};
-use std::hash::{self, Hash};
 
 /// A basic description of a Kubernetes resource, with just enough information to allow Roperator
 /// to communicate with the api server. We use `&'static str` for all of these so that it's easy
@@ -21,18 +20,11 @@ use std::hash::{self, Hash};
 ///
 /// If for some reason you need to create `K8sType`s at runtime, then you can use a string internment library
 /// like `string_cache` or else you can use the `define_type` function.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct K8sType {
     pub api_version: &'static str,
     pub kind: &'static str,
     pub plural_kind: &'static str,
-}
-
-impl Hash for K8sType {
-    fn hash<H: hash::Hasher>(&self, hasher: &mut H) {
-        self.api_version.hash(hasher);
-        self.kind.hash(hasher);
-    }
 }
 
 /// Creates a `&'static K8sType` at runtime **by leaking memory**. This is totally fine, as long as it's only

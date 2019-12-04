@@ -42,7 +42,7 @@ impl SyncRequest {
 
     /// Returns a view of just the children of this request, which is useful for passing to a function that determines the current
     /// status. The returned view has a variety of functions for accessing individual children and groups of children.
-    pub fn children<'a>(&'a self) -> RequestChildren<'a> {
+    pub fn children(&self) -> RequestChildren {
         RequestChildren(self)
     }
 
@@ -165,22 +165,13 @@ impl<'a, T: DeserializeOwned> Iterator for TypedIter<'a, T> {
     type Item = Result<T, serde_json::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let next = self
-                .req
-                .children
-                .get(self.index)
-                .map(|c| serde_json::from_value(c.clone().into_value()));
-            self.index += 1;
-            match next {
-                Some(res) => {
-                    return Some(res);
-                }
-                None => {
-                    return None;
-                }
-            }
-        }
+        let next = self
+            .req
+            .children
+            .get(self.index)
+            .map(|c| serde_json::from_value(c.clone().into_value()));
+        self.index += 1;
+        next
     }
 }
 

@@ -17,8 +17,8 @@ pub enum MergeStrategy {
 }
 
 impl MergeStrategy {
-    fn content_type(&self) -> &'static str {
-        match *self {
+    fn content_type(self) -> &'static str {
+        match self {
             MergeStrategy::Json => "application/json-patch+json",
             MergeStrategy::JsonMerge => "application/merge-patch+json",
             MergeStrategy::StrategicMerge => "application/strategic-merge-patch+json",
@@ -44,7 +44,7 @@ impl Patch {
                     .filter(|f| f.as_str() != Some(finalizer))
                     .collect::<Vec<_>>()
             })
-            .unwrap_or(Vec::new());
+            .unwrap_or_default();
         let patch = serde_json::json!({
             "metadata": {
                 "namespace": resource.get_object_id().namespace(),
@@ -64,8 +64,8 @@ impl Patch {
             .as_ref()
             .pointer("/metadata/finalizers")
             .and_then(Value::as_array)
-            .map(|finalizers| finalizers.clone())
-            .unwrap_or(Vec::new());
+            .cloned()
+            .unwrap_or_default();
         finalizers.push(Value::String(finalizer.to_string()));
         let value = serde_json::json!({
             "metadata": {
@@ -227,11 +227,8 @@ fn make_req(
         .header(header::ACCEPT, "application/json")
         .header(header::USER_AGENT, client_config.user_agent.as_str());
 
-    match client_config.credentials {
-        Credentials::Header(ref value) => {
-            builder.header(header::AUTHORIZATION, value);
-        }
-        _ => {}
+    if let Credentials::Header(ref value) = client_config.credentials {
+        builder.header(header::AUTHORIZATION, value);
     }
     builder
 }
@@ -253,7 +250,9 @@ fn make_url(
         let mut segments = url.path_segments_mut().unwrap();
         let group = k8s_type.group();
 
-        let prefix = if group.len() > 0 { "apis" } else { "api" };
+        // most k8s resources are under /apis/<group>/<version>, but the so called "core v1" resources
+        // live under /api/v1, which is why we check the group here
+        let prefix = if group.is_empty() { "api" } else { "apis" };
         segments.push(prefix);
         if !group.is_empty() {
             segments.push(group);

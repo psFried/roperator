@@ -57,7 +57,7 @@ impl Error {
 
     pub fn is_http_status(&self, code: u16) -> bool {
         match self {
-            &Error::Http(ref status) => status.as_u16() == code,
+            Error::Http(ref status) => status.as_u16() == code,
             _ => false,
         }
     }
@@ -127,30 +127,24 @@ impl Client {
             None => {}
         }
 
-        match config.credentials {
-            Credentials::Pem {
-                ref certificate_base64,
-                ref private_key_base64,
-            } => {
-                let decoded_cert = base64::decode(certificate_base64).map_err(|err| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Invalid base64 content of client-certificate-data: {}", err),
-                    )
-                })?;
-                let decoded_key = base64::decode(private_key_base64).map_err(|err| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Invalid base64 content of client-key-data: {}", err),
-                    )
-                })?;
-                let cert = X509::from_pem(decoded_cert.as_slice())?;
-                let pkey = PKey::private_key_from_pem(decoded_key.as_slice())?;
-                ssl.set_certificate(&*cert)?; // &* is to convert from X509 to &X509Ref where X509 impls Deref to X509Ref
-                ssl.set_private_key(&*pkey)?; // same as above
-                ssl.check_private_key()?; // ensures that the provided private key and certificate actually go together
-            }
-            _ => {}
+        if let Credentials::Pem{ ref certificate_base64, ref private_key_base64 } = config.credentials {
+            let decoded_cert = base64::decode(certificate_base64).map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Invalid base64 content of client-certificate-data: {}", err),
+                )
+            })?;
+            let decoded_key = base64::decode(private_key_base64).map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Invalid base64 content of client-key-data: {}", err),
+                )
+            })?;
+            let cert = X509::from_pem(decoded_cert.as_slice())?;
+            let pkey = PKey::private_key_from_pem(decoded_key.as_slice())?;
+            ssl.set_certificate(&*cert)?; // &* is to convert from X509 to &X509Ref where X509 impls Deref to X509Ref
+            ssl.set_private_key(&*pkey)?; // same as above
+            ssl.check_private_key()?; // ensures that the provided private key and certificate actually go together
         }
 
         if config.verify_ssl_certs {
@@ -232,7 +226,7 @@ impl Client {
                     id,
                     other
                 );
-                Err(Error::http(response.status().clone()))
+                Err(Error::http(response.status()))
             }
         }
     }
@@ -282,7 +276,7 @@ impl Client {
         if response.status().is_success() {
             Ok(())
         } else {
-            let status = response.status().clone();
+            let status = response.status();
             let body = response.into_body().try_concat().await?;
             if let Ok(as_str) = std::str::from_utf8(&body) {
                 log::error!("Response status: {}, body: {}", status, as_str);
@@ -308,7 +302,7 @@ impl Client {
     async fn get_response_lines(&self, req: Request<Body>) -> Result<Lines, Error> {
         let resp = self.get_response(req).await?;
         if !resp.status().is_success() {
-            Err(Error::http(resp.status().clone()))
+            Err(Error::http(resp.status()))
         } else {
             Ok(Lines::from_body(resp.into_body()))
         }
@@ -386,7 +380,7 @@ impl Client {
 
     async fn read_body<T: DeserializeOwned>(response: Response<Body>) -> Result<T, Error> {
         if !response.status().is_success() {
-            return Err(Error::http(response.status().clone()));
+            return Err(Error::http(response.status()));
         }
         let body = response.into_body().try_concat().await?;
 
@@ -414,7 +408,7 @@ impl Lines {
         }
     }
 
-    pub async fn next<'a>(&'a mut self) -> Option<Result<Line<'a>, Error>> {
+    pub async fn next(&mut self) -> Option<Result<Line<'_>, Error>> {
         self.current_line.clear();
 
         loop {
@@ -459,7 +453,7 @@ impl Lines {
         }
     }
 
-    fn make_line<'a>(&'a mut self) -> Line<'a> {
+    fn make_line(&mut self) -> Line {
         Line {
             buffer: self.current_line.as_mut_slice(),
         }

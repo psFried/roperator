@@ -225,7 +225,7 @@ async fn create_operator_state(
     for (child_type, child_conf) in child_types {
         let child_metrics = metrics.watcher_metrics(&child_type);
         let runtime_conf = ChildRuntimeConfig {
-            child_type: child_type,
+            child_type,
             update_strategy: child_conf.update_strategy,
         };
         child_runtime_config.insert(child_type, runtime_conf);
@@ -257,7 +257,7 @@ async fn create_operator_state(
         receiver: rx,
         in_progress_updates: HashMap::new(),
         client,
-        runtime_config: runtime_config.clone(),
+        runtime_config,
     }
 }
 
