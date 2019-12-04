@@ -5,6 +5,7 @@ authors = ["pfried <philipsfried@gmail.com>"]
 edition = "2018"
 description = "Easily create Kubernetes Operators with Rust"
 repository = "https://github.com/psFried/roperator"
+documentation = "https://docs.rs/roperator"
 readme = "README.md"
 keywords = ["kubernetes", "k8s", "operator"]
 categories = ["api-bindings", "config"]
