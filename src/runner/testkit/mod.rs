@@ -1,3 +1,22 @@
+//! The `testkit` module provides helpers that make it easy to write integration tests for your operator.
+//! To use this, you must enable the `testkit` feature in the `dev-dependencies` of your Cargo.toml file.
+//!
+//! ```toml
+//! [dev-dependencies]
+//! roperator = { version = "*", features = [ "testkit" ] }
+//! ```
+//!
+//! It's also recommended to add the following section to your Cargo.toml to tell cargo that the `testkit`
+//! feature must be enabled in order to run the tests.
+//!
+//! ```toml
+//! [[test]]
+//! name = "my-tests-file"
+//! required-features = [ "testkit" ]
+//! ```
+//!
+//! Here, name corresponds to the filename that's used under the `tests/` directory, which is the usual place
+//! for integration tests.
 use crate::{
     config::{ClientConfig, OperatorConfig},
     error::Error,
@@ -26,6 +45,12 @@ macro_rules! test_error {
     }};
 }
 
+/// A `TestKit` is a "batteries-included" fixture for integration testing an operator against a real kubernetes cluster.
+/// The `TestKit` will create the actual operator instance and run it using a tokio `Runtime` that executes only on the current
+/// thread. Part of the convenience of a testkit is that it provides blocking apis for testing the operator, so tests
+/// can be written in a much more straight forward way. Functions on the testkit will automatically run the reconciliation loop of
+/// the operator when you call functions like `assert_resource_eq_eventually` and others. These functions accept timeout values and
+/// will automatically run the reconciliation loop of the operator intermittently as they wait for the desired condition.
 pub struct TestKit {
     state: OperatorState,
     handler: HandlerRef,
@@ -88,6 +113,8 @@ impl Drop for TestKit {
 }
 
 impl TestKit {
+    /// Creates a `TestKit` that will operate _only_ within the given namespace, which will automatically
+    /// create the namespace and **will automatically delete the namespace** when the testkit is dropped.
     pub fn with_test_namespace(
         namespace: impl Into<String>,
         operator_config: OperatorConfig,
@@ -124,6 +151,9 @@ impl TestKit {
         Ok(testkit.delete_namespace_on_drop())
     }
 
+    /// instructs the testkit to delete it's namespace when it is dropped. This is useful for running tests
+    /// each in an isolated namespace. Panics if there was no namespace configured in the `OperatorConfig` that
+    /// was passed when creating the `TestKit`.
     pub fn delete_namespace_on_drop(mut self) -> Self {
         if self.namespace.is_none() {
             panic!("cannot delete namespace on drop because no namespace has been configured for testkit");
@@ -132,6 +162,7 @@ impl TestKit {
         self
     }
 
+    /// Creates a new `TestKit` for the given `OperatorConfig`, `ClientConfig`, and `Handler`
     pub fn create(
         operator_config: OperatorConfig,
         client_config: ClientConfig,
@@ -168,6 +199,8 @@ impl TestKit {
         })
     }
 
+    /// Creates the given parent resource in the kubernetes cluster, and then runs the reconciliation loop
+    /// with the given timeout. Panics if the resource could not be created or if reconciliation fails
     pub fn create_parent(&mut self, resource: impl ToJson, reconciliation_timeout: Duration) {
         let parent_type = self.state.runtime_config.parent_type;
         let json = resource.to_json();
@@ -176,12 +209,16 @@ impl TestKit {
         self.reconcile_and_assert_success(reconciliation_timeout);
     }
 
+    /// Deletes the parent resource identified by the given id, and panics if the delete fails
     pub fn delete_parent(&mut self, id: &ObjectIdRef<'_>) {
         let parent_type = self.state.runtime_config.parent_type;
         self.delete_resource(parent_type, id)
             .expect("failed to delete parent");
     }
 
+    /// Asserts that the resource is eventually deleted from the kubernetes cluster. This will cause the reconciliation loop to
+    /// be run intermittently while waiting for the resource to be deleted. Panics if the resource is not deleted after the timeout
+    /// expires, or on any error either communicating with the api server or in reconciliation.
     pub fn assert_resource_deleted_eventually(
         &mut self,
         k8s_type: &K8sType,
@@ -215,6 +252,9 @@ impl TestKit {
         // if we break from the loop then the result must be None
     }
 
+    /// Asserts that the resource exists or is created at some point before the timeout expires. This will cuase the reconciliation loop
+    /// to be run intermittently while waiting for the resource to be observed. Panics if the resource is not observed before the
+    /// timeout expires, or on any error either communicating with the api server or in reconciliation.
     pub fn assert_resource_exists_eventually(
         &mut self,
         k8s_type: &K8sType,
@@ -248,6 +288,9 @@ impl TestKit {
         // result must be some
     }
 
+    /// Returns a `SyncRequest` that represents a snapshot of the known cluster state related to the given parent. Returns a
+    /// `MissingResource` error if the parent does not exist. Returns any errors from the informer backend if there's been an
+    /// error watching a resource.
     pub fn get_current_state_for_parent(
         &mut self,
         parent_id: &ObjectIdRef<'_>,
@@ -273,6 +316,11 @@ impl TestKit {
         Ok(req)
     }
 
+    /// Asserts that all of the fields specified in `expected` match the actual object in the kubernetes cluster at
+    /// some point before the timeout expires. This will cuase the reconciliation loop to be run intermittently while
+    /// waiting for the resource to be observed. Panics if the resource does not match `expected` before the
+    /// timeout expires, or on any error either communicating with the api server or in reconciliation.
+    /// The actual resource is allowed to contain extra fields that are not specified in `expected`.
     pub fn assert_resource_eq_eventually(
         &mut self,
         k8s_type: &K8sType,
@@ -348,6 +396,9 @@ impl TestKit {
         }
     }
 
+    /// Assert that the current known state of the given resource matches `expected`.
+    /// Specifically, all fields in `expected` must be equal to the same fields in the actual resource.
+    /// The actual resource is allowed to contain extra fields that are not specified in `expected`.
     pub fn assert_child_resource_eq(
         &mut self,
         k8s_type: &K8sType,
@@ -369,6 +420,8 @@ impl TestKit {
         }
     }
 
+    /// Fetches the resource with the given type and id from the kubernetes api server and returns the raw json.
+    /// HTTP 404 responses are converted to a `None` value.
     pub fn get_resource_from_api_server(
         &mut self,
         k8s_type: &K8sType,
@@ -383,6 +436,8 @@ impl TestKit {
         Ok(maybe_resource)
     }
 
+    /// Update an arbitrary resource using a PUT request to the kuberntes api server. The `K8sType` passed
+    /// here does not need to be one of the types included in the `OperatorConfig` for this testkit.
     pub fn replace_resource(
         &mut self,
         k8s_type: &K8sType,
@@ -402,6 +457,8 @@ impl TestKit {
         Ok(())
     }
 
+    /// Create an arbitrary resource using a POST request to the kuberntes api server. The `K8sType` passed
+    /// here does not need to be one of the types included in the `OperatorConfig` for this testkit.
     pub fn create_resource(
         &mut self,
         k8s_type: &K8sType,
@@ -416,6 +473,8 @@ impl TestKit {
         Ok(())
     }
 
+    /// Delete an arbitrary resource using a DELETE request to the kuberntes api server. The `K8sType` passed
+    /// here does not need to be one of the types included in the `OperatorConfig` for this testkit.
     pub fn delete_resource(
         &mut self,
         k8s_type: &K8sType,
@@ -430,15 +489,22 @@ impl TestKit {
         Ok(())
     }
 
+    /// Runs the reconciliation loop for at most `max_timeout` and panics if there was an error in the reconciliation
+    /// or if any `Handler` returns an error during this time.
     pub fn reconcile_and_assert_success(&mut self, max_timeout: Duration) {
         self.run_reconciliation(true, max_timeout)
             .expect("Reconciliation failed");
     }
 
+    /// Runs the reconciliation loop for at most `max_timeout` returning any errors either from roperator or from
+    /// the `Handler` that occurred during this time.
     pub fn reconcile(&mut self, max_timeout: Duration) -> Result<(), Error> {
         self.run_reconciliation(true, max_timeout)
     }
 
+    /// Runs the reconciliation loop for at most `max_timeout` returning any errors from roperator that occurred
+    /// during this time. If `fail_on_handler_error` is `true`, then any errors from `Handler` invocations during
+    /// this time would also be returned
     pub fn run_reconciliation(
         &mut self,
         fail_on_handler_error: bool,
