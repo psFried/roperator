@@ -46,6 +46,14 @@
 //!             ]
 //!         }
 //!     });
+//!     let status = json!({
+//!         // normally, we'd derive the status by taking a look at the existing `children` in the request
+//!         "message": "everything looks good here!",
+//!     });
+//!     Ok(SyncResponse {
+//!         status,
+//!         children: vec![pod],
+//!     })
 //! }
 //! ```
 //!
