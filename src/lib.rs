@@ -1,3 +1,58 @@
+//! Roperator lets you easily write Kubernetes Operators that manage a potentially complex set of
+//! _child_ Kuberntes resources for each instance of a _parent_ Custom Resource.
+//!
+//! To get started, all you need is an `OperatorConfig` and a `Handler` implementation.
+//!
+//! Busybox operator example:
+//! ```no_run
+//! use roperator::prelude::*;
+//! use roperator::serde_json::json;
+//!
+//! /// Name of our operator, which is automatically added as a label value in all of the child resources we create
+//! const OPERATOR_NAME: &str = "echoserver-example";
+//!
+//! // a `K8sType` with basic info about our parent CRD
+//! static PARENT_TYPE: &K8sType = &K8sType {
+//!    api_version: "example.roperator.com/v1alpha1",
+//!    kind: "BusyBox",
+//!    plural_kind: "busyboxes",
+//! };
+//!
+//! fn main() {
+//!     // create the OperatorConfig, which tells Roperator about the types of your parent and child resources, and
+//!     let operator_config = OperatorConfig::new(OPERATOR_NAME, PARENT_TYPE)
+//!         .with_child(k8s_types::core::v1::Pod, ChildConfig::recreate());
+//!
+//!     run_operator(operator_config, handle_sync);
+//! }
+//!
+//! fn handle_sync(request: &SyncRequest) -> Result<SyncResponse, Error> {
+//!     let pod = json!({
+//!         "metadata": {
+//!             "namespace": request.parent.namespace(),
+//!             "name": format!("{}-busybox", request.parent.name()),
+//!         },
+//!         "spec": {
+//!             "containers": [
+//!                 {
+//!                     "name": "busybox",
+//!                     "image": "busybox:latest",
+//!                     "command": [
+//!                         "bash",
+//!                         "-c",
+//!                         format!("while true; do; echo 'Hello from {}'; sleep 10; done;", request.parent.name()),
+//!                     ]
+//!                 }
+//!             ]
+//!         }
+//!     });
+//! }
+//! ```
+//!
+//! The main function in most operators just needs to call `roperator::runner::run_operator` or
+//! `roperator::runner::run_operator_with_client_config`, passing the `OperatorConfig` and your `Handler` implementation.
+//!
+
 #[macro_use]
 extern crate serde_derive;
 
