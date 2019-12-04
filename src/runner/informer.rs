@@ -62,7 +62,10 @@ impl ReverseIndex for LabelToIdIndex {
     }
 
     fn insert(&mut self, key: &str, res: &K8sResource) {
-        let set = self.entries.entry(key.to_owned()).or_insert_with(HashSet::new);
+        let set = self
+            .entries
+            .entry(key.to_owned())
+            .or_insert_with(HashSet::new);
         let id = res.get_object_id();
         if !set.contains(&id) {
             set.insert(id.into_owned());

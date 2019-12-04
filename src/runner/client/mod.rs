@@ -127,7 +127,11 @@ impl Client {
             None => {}
         }
 
-        if let Credentials::Pem{ ref certificate_base64, ref private_key_base64 } = config.credentials {
+        if let Credentials::Pem {
+            ref certificate_base64,
+            ref private_key_base64,
+        } = config.credentials
+        {
             let decoded_cert = base64::decode(certificate_base64).map_err(|err| {
                 io::Error::new(
                     io::ErrorKind::Other,
