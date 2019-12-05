@@ -361,7 +361,6 @@ pub trait Handler: Send + Sync + 'static {
     }
 }
 
-
 impl<F> Handler for F
 where
     F: Fn(&SyncRequest) -> Result<SyncResponse, Error> + Send + Sync + 'static,
