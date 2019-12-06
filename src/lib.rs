@@ -18,15 +18,18 @@
 //!    plural_kind: "busyboxes",
 //! };
 //!
-//! fn main() {
-//!     // create the OperatorConfig, which tells Roperator about the types of your parent and child resources, and
-//!     let operator_config = OperatorConfig::new(OPERATOR_NAME, PARENT_TYPE)
-//!         .with_child(k8s_types::core::v1::Pod, ChildConfig::recreate());
+//! // In your main function create the OperatorConfig, which tells Roperator about
+//! // the types of your parent and child resources, and about how to deal with
+//! // each type of child resource when it needs updated
+//! let operator_config = OperatorConfig::new(OPERATOR_NAME, PARENT_TYPE)
+//!     .with_child(k8s_types::core::v1::Pod, ChildConfig::recreate());
 //!
-//!     run_operator(operator_config, handle_sync);
-//! }
+//! // this function will block the current thread indifinitely while the operator runs
+//! run_operator(operator_config, handle_sync);
 //!
 //! fn handle_sync(request: &SyncRequest) -> Result<SyncResponse, Error> {
+//!     // for this tiny example, we'll only create a single Pod. You can also use any of the types
+//!     // defined in the k8s_openapi crate, which has serializable structs for all the usual resources
 //!     let pod = json!({
 //!         "metadata": {
 //!             "namespace": request.parent.namespace(),
