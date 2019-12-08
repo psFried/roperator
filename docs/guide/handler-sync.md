@@ -61,7 +61,10 @@ For simple handlers, there's a blanket impl for all `Fn(&SyncRequest) -> Result<
 
 ```rust
 fn my_handler(req: &SyncRequest) -> Result<SyncResponse, Error> {
+    // from_status accepts any type that implements `serde::Serialize`
     let mut response = SyncResponse::from_status(determine_status(req))?;
+
+    // add_child also accepts any type that implements `serde::Serialize`
     response.add_child(get_child_pod(req))?;
     response.add_child(get_child_service(req))?;
     // ... and so on
@@ -83,7 +86,7 @@ impl Handler for MyHandler {
         let mut response = SyncResponse::from_status(determine_status(req))?;
         response.add_child(get_child_pod(req))?;
         response.add_child(get_child_service(req))?;
-        // ... and so on
+        // ...
         Ok(response)
     }
 }
