@@ -1,6 +1,6 @@
 # Roperator
 
-![roperator](https://docs.rs/roperator/badge.svg)
+[![roperator](https://docs.rs/roperator/badge.svg)](https://docs.rs/roperator)
 
 Roperator lets you easily write [Kubernetes Operators](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/) in Rust. Roperator handles all the mechanics and plumbing of watching and updating your resources. All you have to do is to write a function that returns the desired state of your resources. Roperator was heavily inspired by the excellent [Metacontroller](https://github.com/GoogleCloudPlatform/metacontroller) project, which it seems is no longer maintained.
 
@@ -11,6 +11,11 @@ The goal of this project is to make it really easy to write operators for the va
 The core of your operator is a _sync_ function that gets passed a snapshot view of the _parent_ custom resource and any existing _children_ in a `SyncRequest` struct. This function will simply return the _desired_ set of children for the given parent, as well as a JSON object that should be set as the `status` of the parent. Your sync function does not need to directly communicate with the Kubernetes API server in any way. Roperator will handle watching all of the resources, invoking your sync function whenever it's needed, and updating the child resources and the parent status.
 
 The [EchoServer example](examples/echo-server/README.md) is a good first example to look at to see how everythign fits together end to end.
+
+### Dependencies
+
+- Rust 1.39 or later
+- Openssl libraries and headers. Roperator uses the rust `openssl` crate. You can check out their docs on building and linking to openssl [here](https://docs.rs/openssl/0.10.26/openssl/index.html#building)
 
 ## Getting Started
 

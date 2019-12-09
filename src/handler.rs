@@ -1,3 +1,9 @@
+//! The `handler` module defines the `Handler` trait. Operators must implement their own `Handler`,
+//! which is where the majority of your code will live.
+//!
+//! The `Handler` functions you implement will both be passed a `SyncRequest` that represents a
+//! snapshot of the state of a given parent resource, along with any children that currently exist for it.
+//! This request struct has lots of functions on it for accessing and deserializing child resources.
 use crate::error::Error;
 use crate::resource::{K8sResource, K8sTypeRef, ObjectIdRef};
 
@@ -296,12 +302,19 @@ impl SyncResponse {
 }
 
 /// The response returned from a finalize function. Finalize functions may not return any children, but they may
-/// modify the parent status.
+/// modify the parent status. Note that the status of the parent will only be updated if `finalized` is `false`,
+/// since if it's `true` then it typically indicates that the actual deletion of the resource is likely imminent.
 #[derive(Deserialize, Serialize, Clone, PartialEq)]
 pub struct FinalizeResponse {
+    /// The desired status of the parent. This will be ignored if `finalized` is `true`, but if `finalized` is false,
+    /// then the parent status will be updated to this value.
     pub status: Value,
+    /// Whether or not it's OK to proceed with deletion of the parent resource. If this is `true`, then roperator will
+    /// remove itself from the list of finalizers for the parent, which will allow deletion to proceed. If this is `false`,
+    /// then roperator will update the parent status and re-try your finalize function later.
     pub finalized: bool,
 }
+
 impl Debug for FinalizeResponse {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let as_string = if f.alternate() {
@@ -347,12 +360,6 @@ pub trait Handler: Send + Sync + 'static {
         })
     }
 }
-
-// impl <F> Handler for F where F: Fn(&SyncRequest) -> SyncResponse + Send + Sync + 'static {
-//     fn sync(&self, req: &SyncRequest) -> Result<SyncResponse, Error> {
-//         Ok(self(req))
-//     }
-// }
 
 impl<F> Handler for F
 where

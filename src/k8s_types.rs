@@ -1,3 +1,23 @@
+//! Since roperator doesn't use any swagger codegen or specialized kuberntes clients, it needs to have another
+//! way to encode and pass around information about the types of resources that it deals with. Instead, roperator
+//! uses the `K8sType` struct. The `OperatorConfig` api deals with the type `&'static K8sType`. The various submodules
+//! here have predefined `&'static K8sType`s for all of the common v1 and v1beta1 (as of 1.15) resources. For any other
+//! types, you'd typically use the following:
+//!
+//! ```rust
+//! use roperator::prelude::K8sType;
+//!
+//! static MY_TYPE: &K8sType = &K8sType {
+//!     api_version: "my.group/v1",
+//!     kind: "MyType",
+//!     plural_kind: "mytypes"
+//! };
+//! ```
+//!
+//! If you need to load the type information at runtime, though, you could use `define_type` function, which will
+//! take its arguments as `String`s and return a `&'static K8sType` by leaking the memory. This is fine, as long as
+//! you only do it once, on startup.
+//!
 use crate::resource::K8sTypeRef;
 
 use std::fmt::{self, Display};
