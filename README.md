@@ -1,8 +1,11 @@
 # Roperator
 
-[![roperator](https://docs.rs/roperator/badge.svg)](https://docs.rs/roperator)
+[![roperator](https://docs.rs/roperator/badge.svg)](https://docs.rs/roperator) [![crates.io](https://shields.io/crates/v/roperator)](https://crates.io/roperator)
 
 Roperator lets you easily write [Kubernetes Operators](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/) in Rust. Roperator handles all the mechanics and plumbing of watching and updating your resources. All you have to do is to write a function that returns the desired state of your resources. Roperator was heavily inspired by the excellent [Metacontroller](https://github.com/GoogleCloudPlatform/metacontroller) project, which it seems is no longer maintained.
+
+- [**The Guide**](https://psfried.github.io/roperator/)
+- [**API Documentation**](https://docs.rs/roperator/)
 
 ## Declarative Operator
 
@@ -34,8 +37,8 @@ roperator = { version = "*", features = ["testkit"] }
 
 The first thing you'll need is a configuration object that specifies the relationships between the CRD that will act as the _parent_ and the types of resources that may be created as _children_.
 
-```rust
-use roperator::prelude::{k8s_types, K8sType, OperatorConfiguration, ChildConfig, run_operator};
+```rust,no_run
+use roperator::prelude::{k8s_types, K8sType, OperatorConfig, ChildConfig, run_operator};
 /// The type of our parent Custom Resource. This must match the fields provided in the CRD
 pub static PARENT_TYPE: &K8sType = &K8sType {
     api_version: "example.com/v1alpha1",
@@ -82,7 +85,6 @@ impl Handler for MyHandler {
 Handlers may optionally implement the `finalize` function. This function gets called when then parent resource is being deleted, and allows you to clean up any external resources that may have been created. Roperator does its best to ensure that `finalize` will get invoked _at least_ once per parent that is being deleted. It is not possible to guarantee that this will happen, though, since Kuberntes allows clients to force the deletion of resources without waiting for finalizers.
 
 ```rust
-
 fn finalize(&self, request: &SyncRequest) -> Result<FinalizeResponse, Error> {
     // We return a boolean that says whether the finalization was successful or not. If we return false,
     // then roperator will continue to regularly re-try your finalize function until it succeeds.

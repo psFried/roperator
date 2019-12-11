@@ -41,7 +41,7 @@ fn setup(name: &str, handler: impl Handler) -> TestKit {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "roperator=INFO");
     }
-    let _ = env_logger::try_init();
+    let _ = env_logger::builder().is_test(true).try_init();
     let operator_config = OperatorConfig::new(name, PARENT_TYPE)
         .within_namespace(name)
         .with_child(CHILD_ONE_TYPE, ChildConfig::recreate())
