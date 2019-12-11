@@ -1,5 +1,5 @@
 use roperator::prelude::*;
-use roperator::resource::{ObjectIdRef, K8sResource};
+use roperator::resource::{K8sResource, ObjectIdRef};
 use roperator::runner::testkit::{HandlerErrors, TestKit};
 
 use roperator::serde_json::{json, Value};
@@ -52,13 +52,15 @@ fn setup_with(name: &str, handler: impl Handler, operator_config: OperatorConfig
         std::env::set_var("RUST_LOG", "roperator=INFO");
     }
     let _ = env_logger::builder().is_test(true).try_init();
-    let conf = operator_config.within_namespace(name).expose_health(false).expose_metrics(false);
+    let conf = operator_config
+        .within_namespace(name)
+        .expose_health(false)
+        .expose_metrics(false);
 
     let client_config = make_client_config(name);
     TestKit::with_test_namespace(name, conf, client_config, handler)
         .expect("Failed to create test kit")
 }
-
 
 fn parent(namespace: &str, name: &str) -> Value {
     json!({
@@ -255,22 +257,21 @@ fn child_is_recreated_after_being_deleted() {
         .expect("failed to create parent resource");
 
     let id = ObjectIdRef::new(&namespace, parent_name);
-    testkit.assert_resource_exists_eventually(
-        CHILD_ONE_TYPE,
-        &id,
-        Duration::from_secs(15),
-    );
+    testkit.assert_resource_exists_eventually(CHILD_ONE_TYPE, &id, Duration::from_secs(15));
 
-    let old_child = testkit.get_resource_from_api_server(CHILD_ONE_TYPE, &id)
+    let old_child = testkit
+        .get_resource_from_api_server(CHILD_ONE_TYPE, &id)
         .expect("Failed to fetch resource")
         .expect("child did not exist");
     let old_child = K8sResource::from_value(old_child).expect("old child was invalid");
 
-
-    testkit.delete_resource(CHILD_ONE_TYPE, &id).expect("failed to delete child");
+    testkit
+        .delete_resource(CHILD_ONE_TYPE, &id)
+        .expect("failed to delete child");
     testkit.reconcile_and_assert_success(Duration::from_secs(10));
 
-    let new_child = testkit.get_resource_from_api_server(CHILD_ONE_TYPE, &id)
+    let new_child = testkit
+        .get_resource_from_api_server(CHILD_ONE_TYPE, &id)
         .expect("Failed to fetch resource")
         .expect("child did not exist");
     let new_child = K8sResource::from_value(new_child).expect("new_child was invalid");
@@ -291,38 +292,58 @@ fn child_is_not_updated_until_deleted_when_update_strategy_is_on_delete() {
         .expect("failed to create parent resource");
 
     let id = ObjectIdRef::new(&namespace, parent_name);
-    testkit.assert_resource_exists_eventually(
-        CHILD_ONE_TYPE,
-        &id,
-        Duration::from_secs(15),
-    );
+    testkit.assert_resource_exists_eventually(CHILD_ONE_TYPE, &id, Duration::from_secs(15));
 
-    let old_child = testkit.get_resource_from_api_server(CHILD_ONE_TYPE, &id)
+    let old_child = testkit
+        .get_resource_from_api_server(CHILD_ONE_TYPE, &id)
         .expect("Failed to fetch resource")
         .expect("child did not exist");
     let old_child = K8sResource::from_value(old_child).expect("old child was invalid");
-    assert_eq!(Some("bar"), old_child.pointer("/spec/parentSpec/foo").and_then(Value::as_str));
+    assert_eq!(
+        Some("bar"),
+        old_child
+            .pointer("/spec/parentSpec/foo")
+            .and_then(Value::as_str)
+    );
     let prev_generation = old_child.generation();
 
     // now update the parent
-    let mut new_parent = testkit.get_resource_from_api_server(PARENT_TYPE, &id).expect("failed to fetch parent").expect("parent was not found");
-    new_parent.pointer_mut("/spec").unwrap().as_object_mut().unwrap().insert("foo".to_string(), Value::String("CANARY".to_string()));
-    testkit.replace_resource(PARENT_TYPE, &id, &new_parent).expect("failed to update parent");
+    let mut new_parent = testkit
+        .get_resource_from_api_server(PARENT_TYPE, &id)
+        .expect("failed to fetch parent")
+        .expect("parent was not found");
+    new_parent
+        .pointer_mut("/spec")
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .insert("foo".to_string(), Value::String("CANARY".to_string()));
+    testkit
+        .replace_resource(PARENT_TYPE, &id, &new_parent)
+        .expect("failed to update parent");
 
     testkit.reconcile_and_assert_success(Duration::from_secs(5));
 
-    let old_child = testkit.get_resource_from_api_server(CHILD_ONE_TYPE, &id)
+    let old_child = testkit
+        .get_resource_from_api_server(CHILD_ONE_TYPE, &id)
         .expect("Failed to fetch resource")
         .expect("child did not exist");
     let old_child = K8sResource::from_value(old_child).expect("old child was invalid");
-    assert_eq!(Some("bar"), old_child.pointer("/spec/parentSpec/foo").and_then(Value::as_str));
+    assert_eq!(
+        Some("bar"),
+        old_child
+            .pointer("/spec/parentSpec/foo")
+            .and_then(Value::as_str)
+    );
     assert_eq!(prev_generation, old_child.generation());
 
-
-    testkit.delete_resource(CHILD_ONE_TYPE, &id).expect("failed to delete child");
+    testkit
+        .delete_resource(CHILD_ONE_TYPE, &id)
+        .expect("failed to delete child");
     testkit.reconcile_and_assert_success(Duration::from_secs(10));
 
-    let new_child = testkit.get_resource_from_api_server(CHILD_ONE_TYPE, &id)
+    let new_child = testkit
+        .get_resource_from_api_server(CHILD_ONE_TYPE, &id)
         .expect("Failed to fetch resource")
         .expect("child did not exist");
     let new_child = K8sResource::from_value(new_child).expect("new_child was invalid");
