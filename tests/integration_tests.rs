@@ -1,5 +1,5 @@
 use roperator::prelude::*;
-use roperator::resource::ObjectIdRef;
+use roperator::resource::{ObjectIdRef, K8sResource};
 use roperator::runner::testkit::{HandlerErrors, TestKit};
 
 use roperator::serde_json::{json, Value};
@@ -234,6 +234,40 @@ fn operator_retries_finalize_when_response_finalized_is_false() {
 
     let actual_finalize_calls = finalize_call_count.load(Ordering::SeqCst);
     assert!(actual_finalize_calls >= REQUIRED_FINALIZE_CALLS);
+}
+
+#[test]
+fn child_is_recreated_after_being_deleted() {
+    let namespace = unique_namespace("recreate-after-del");
+    let mut testkit = setup(namespace.as_str(), create_child_handler);
+
+    let parent_name = "parent";
+    let parent = parent(&namespace, parent_name);
+    testkit
+        .create_resource(PARENT_TYPE, &parent)
+        .expect("failed to create parent resource");
+
+    let id = ObjectIdRef::new(&namespace, parent_name);
+    testkit.assert_resource_exists_eventually(
+        CHILD_ONE_TYPE,
+        &id,
+        Duration::from_secs(15),
+    );
+
+    let old_child = testkit.get_resource_from_api_server(CHILD_ONE_TYPE, &id)
+        .expect("Failed to fetch resource")
+        .expect("child did not exist");
+    let old_child = K8sResource::from_value(old_child).expect("old child was invalid");
+
+
+    testkit.delete_resource(CHILD_ONE_TYPE, &id).expect("failed to delete child");
+    testkit.reconcile_and_assert_success(Duration::from_secs(10));
+
+    let new_child = testkit.get_resource_from_api_server(CHILD_ONE_TYPE, &id)
+        .expect("Failed to fetch resource")
+        .expect("child did not exist");
+    let new_child = K8sResource::from_value(new_child).expect("new_child was invalid");
+    assert_ne!(old_child.uid(), new_child.uid()); // assert that they're different instances
 }
 
 #[derive(Debug, PartialEq, Clone)]
