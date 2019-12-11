@@ -38,20 +38,27 @@ static CHILD_ONE_TYPE: &K8sType = &K8sType {
 };
 
 fn setup(name: &str, handler: impl Handler) -> TestKit {
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "roperator=INFO");
-    }
-    let _ = env_logger::builder().is_test(true).try_init();
     let operator_config = OperatorConfig::new(name, PARENT_TYPE)
         .within_namespace(name)
         .with_child(CHILD_ONE_TYPE, ChildConfig::recreate())
         .expose_health(false)
         .expose_metrics(false);
-    let client_config = make_client_config(name);
 
-    TestKit::with_test_namespace(name, operator_config, client_config, handler)
+    setup_with(name, handler, operator_config)
+}
+
+fn setup_with(name: &str, handler: impl Handler, operator_config: OperatorConfig) -> TestKit {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "roperator=INFO");
+    }
+    let _ = env_logger::builder().is_test(true).try_init();
+    let conf = operator_config.within_namespace(name).expose_health(false).expose_metrics(false);
+
+    let client_config = make_client_config(name);
+    TestKit::with_test_namespace(name, conf, client_config, handler)
         .expect("Failed to create test kit")
 }
+
 
 fn parent(namespace: &str, name: &str) -> Value {
     json!({
@@ -258,6 +265,58 @@ fn child_is_recreated_after_being_deleted() {
         .expect("Failed to fetch resource")
         .expect("child did not exist");
     let old_child = K8sResource::from_value(old_child).expect("old child was invalid");
+
+
+    testkit.delete_resource(CHILD_ONE_TYPE, &id).expect("failed to delete child");
+    testkit.reconcile_and_assert_success(Duration::from_secs(10));
+
+    let new_child = testkit.get_resource_from_api_server(CHILD_ONE_TYPE, &id)
+        .expect("Failed to fetch resource")
+        .expect("child did not exist");
+    let new_child = K8sResource::from_value(new_child).expect("new_child was invalid");
+    assert_ne!(old_child.uid(), new_child.uid()); // assert that they're different instances
+}
+
+#[test]
+fn child_is_not_updated_until_deleted_when_update_strategy_is_on_delete() {
+    let namespace = unique_namespace("on-delete");
+    let operator_config = OperatorConfig::new(namespace.as_str(), PARENT_TYPE)
+        .with_child(CHILD_ONE_TYPE, ChildConfig::on_delete());
+    let mut testkit = setup_with(namespace.as_str(), create_child_handler, operator_config);
+
+    let parent_name = "parent";
+    let parent = parent(&namespace, parent_name);
+    testkit
+        .create_resource(PARENT_TYPE, &parent)
+        .expect("failed to create parent resource");
+
+    let id = ObjectIdRef::new(&namespace, parent_name);
+    testkit.assert_resource_exists_eventually(
+        CHILD_ONE_TYPE,
+        &id,
+        Duration::from_secs(15),
+    );
+
+    let old_child = testkit.get_resource_from_api_server(CHILD_ONE_TYPE, &id)
+        .expect("Failed to fetch resource")
+        .expect("child did not exist");
+    let old_child = K8sResource::from_value(old_child).expect("old child was invalid");
+    assert_eq!(Some("bar"), old_child.pointer("/spec/parentSpec/foo").and_then(Value::as_str));
+    let prev_generation = old_child.generation();
+
+    // now update the parent
+    let mut new_parent = testkit.get_resource_from_api_server(PARENT_TYPE, &id).expect("failed to fetch parent").expect("parent was not found");
+    new_parent.pointer_mut("/spec").unwrap().as_object_mut().unwrap().insert("foo".to_string(), Value::String("CANARY".to_string()));
+    testkit.replace_resource(PARENT_TYPE, &id, &new_parent).expect("failed to update parent");
+
+    testkit.reconcile_and_assert_success(Duration::from_secs(5));
+
+    let old_child = testkit.get_resource_from_api_server(CHILD_ONE_TYPE, &id)
+        .expect("Failed to fetch resource")
+        .expect("child did not exist");
+    let old_child = K8sResource::from_value(old_child).expect("old child was invalid");
+    assert_eq!(Some("bar"), old_child.pointer("/spec/parentSpec/foo").and_then(Value::as_str));
+    assert_eq!(prev_generation, old_child.generation());
 
 
     testkit.delete_resource(CHILD_ONE_TYPE, &id).expect("failed to delete child");
