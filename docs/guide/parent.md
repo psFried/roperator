@@ -57,7 +57,7 @@ Roperator uses static references for defining `K8sType`s. This makes it very con
 
 ### Look Ma, no schema!
 
-Roperator only needs to know this minimal amount of information about your types because it treats all resources the same, and only stores them as plain JSON values. So there's no need to define structs for your resources if you don't want to. You _may_ still define structs if you want, but they only need to define the fields that you care about. They don't need to include fields for the extra stuff that's added by the Kubernetes api server. See the [Serialization chapter](serialization.md) for more details on that.
+Roperator only needs to know this minimal amount of information about your types because it treats all resources the same, and only stores them as plain JSON values. So there's no need to define structs for your resources if you don't want to. You _may_ still define structs if you want, but they only need to define the fields that you care about. They don't need to include fields for the extra stuff that's added by the Kubernetes api server. See the [Serialization chapter](../reference/serialization.md) for more details on that.
 
 
 # Next

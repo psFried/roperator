@@ -72,4 +72,4 @@ If either metrics or health are enabled, then roperator will start an HTTP serve
 
 # Next
 
-[Implementing your Handler](handler-sync.rs)
+[Implementing your Handler](handler-sync.md)
