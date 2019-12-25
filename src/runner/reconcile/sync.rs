@@ -174,7 +174,14 @@ async fn update_children(
         // ensure that the child has the same namespace as the parent. This is a deliberate constraint that
         // we place on users of this library, as having non-namespaced children of namespaced parents would
         // add considerable complexity.
-        if child_id.namespace() != parent_id.namespace() {
+        let valid_namespaces = match (parent_id.namespace(), child_id.namespace()) {
+            (None, None) => true,
+            (None, Some(_)) => true,
+            (Some(p), Some(c)) => p == c,
+            (Some(_), None) => false,
+        };
+
+        if !valid_namespaces {
             log::error!(
                 "Child {} is not in the same namespace as parent: {}",
                 child_id,
