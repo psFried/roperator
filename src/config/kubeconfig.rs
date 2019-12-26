@@ -5,7 +5,7 @@ use dirs::home_dir;
 use std::fmt::{self, Display};
 use std::fs::File;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const MISSING_CREDENTIAL_MESSAGE: &str = "No supported credentials found in kubeconfig file for the selected context. Only token, username/password, client certificate, and exec are currently supported. Please file an issue if there's another mechanism that you need";
 const NO_HOME_DIR_MESSAGE: &str = "Unable to determine HOME directory to load ~/.kube/config";
@@ -61,61 +61,27 @@ fn get_kubeconfig_path() -> Result<PathBuf, KubeConfigError> {
         .ok_or(KubeConfigError::NoHomeDir)
 }
 
+pub fn load_kubeconfig(
+    user_agent: String,
+    file_path: impl AsRef<Path>,
+) -> Result<ClientConfig, KubeConfigError> {
+    let reader = File::open(file_path.as_ref())?;
+    let kubeconfig: KubeConfig = serde_yaml::from_reader(reader)?;
+    let dir = file_path.as_ref().parent().ok_or_else(|| {
+        KubeConfigError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "Cannot determine parent directory of kube config file at path: '{}'",
+                file_path.as_ref().display()
+            ),
+        ))
+    })?;
+    kubeconfig.resolve(user_agent, dir)
+}
+
 pub fn load_from_kubeconfig(user_agent: String) -> Result<ClientConfig, KubeConfigError> {
     let path = get_kubeconfig_path()?;
-    let reader = File::open(&path)?;
-    let kubeconfig: KubeConfig = serde_yaml::from_reader(reader)?;
-
-    let current_context = kubeconfig.current_context.as_str();
-
-    let found_context = kubeconfig
-        .contexts
-        .iter()
-        .find(|ctx| ctx.name.as_str() == current_context)
-        .ok_or_else(|| {
-            KubeConfigError::InvalidKubeconfig(format!(
-                "No countext found for current context: '{}'",
-                current_context
-            ))
-        })?;
-    let found_cluster = kubeconfig
-        .clusters
-        .iter()
-        .find(|cluster| cluster.name.as_str() == found_context.context.cluster.as_str())
-        .ok_or_else(|| {
-            KubeConfigError::InvalidKubeconfig(format!(
-                "No cluster found for name: '{}'",
-                found_context.context.cluster
-            ))
-        })?;
-    let found_user = kubeconfig
-        .users
-        .iter()
-        .find(|user| user.name.as_str() == found_context.context.user.as_str())
-        .ok_or_else(|| {
-            KubeConfigError::InvalidKubeconfig(format!(
-                "No user found for name: '{}'",
-                found_context.context.user
-            ))
-        })?;
-
-    let credentials = get_credentials(&found_user.user)?;
-
-    let impersonate = found_user.user.as_user.clone();
-    let impersonate_groups = found_user.user.as_groups.clone();
-
-    let conf = ClientConfig {
-        user_agent,
-        credentials,
-        impersonate,
-        impersonate_groups,
-        api_server_endpoint: found_cluster.cluster.server.clone(),
-        ca_data: Some(CAData::Contents(
-            found_cluster.cluster.certificate_authority_data.clone(),
-        )),
-        verify_ssl_certs: true,
-    };
-    Ok(conf)
+    load_kubeconfig(user_agent, path)
 }
 
 fn get_credentials(user: &UserInfo) -> Result<Credentials, KubeConfigError> {
@@ -203,7 +169,8 @@ struct ExecCredentialStatus {
 #[serde(rename_all = "kebab-case")]
 struct ClusterInfo {
     server: String,
-    certificate_authority_data: String,
+    certificate_authority_data: Option<String>,
+    certificate_authority: Option<PathBuf>,
 }
 
 #[derive(Deserialize, Debug, PartialEq, Clone)]
@@ -271,4 +238,99 @@ struct KubeConfig {
     clusters: Vec<Cluster>,
     users: Vec<User>,
     contexts: Vec<Context>,
+}
+
+impl KubeConfig {
+    fn resolve(
+        &self,
+        user_agent: String,
+        kube_config_dir: &Path,
+    ) -> Result<ClientConfig, KubeConfigError> {
+        let current_context = self.current_context.as_str();
+        let found_context = self
+            .contexts
+            .iter()
+            .find(|ctx| ctx.name.as_str() == current_context)
+            .ok_or_else(|| {
+                KubeConfigError::InvalidKubeconfig(format!(
+                    "No countext found for current context: '{}'",
+                    current_context
+                ))
+            })?;
+        let found_cluster = self
+            .clusters
+            .iter()
+            .find(|cluster| cluster.name.as_str() == found_context.context.cluster.as_str())
+            .ok_or_else(|| {
+                KubeConfigError::InvalidKubeconfig(format!(
+                    "No cluster found for name: '{}'",
+                    found_context.context.cluster
+                ))
+            })?;
+        let found_user = self
+            .users
+            .iter()
+            .find(|user| user.name.as_str() == found_context.context.user.as_str())
+            .ok_or_else(|| {
+                KubeConfigError::InvalidKubeconfig(format!(
+                    "No user found for name: '{}'",
+                    found_context.context.user
+                ))
+            })?;
+
+        let credentials = get_credentials(&found_user.user)?;
+
+        let impersonate = found_user.user.as_user.clone();
+        let impersonate_groups = found_user.user.as_groups.clone();
+
+        let ca_data = found_cluster
+            .cluster
+            .certificate_authority_data
+            .clone()
+            .map(CAData::Contents)
+            .or_else(|| {
+                found_cluster
+                    .cluster
+                    .certificate_authority
+                    .clone()
+                    .map(|ca_path| {
+                        // TODO: we'll need to make a breaking change to the CAData enum so that we can
+                        // always use Paths instead of strings for these
+                        let resolved_path =
+                            kube_config_dir.join(&ca_path).to_string_lossy().to_string();
+                        log::debug!(
+                            "Resolved cluster certificate-authority path '{}' to '{}'",
+                            ca_path.display(),
+                            resolved_path
+                        );
+                        CAData::File(resolved_path)
+                    })
+            });
+
+        let conf = ClientConfig {
+            user_agent,
+            credentials,
+            impersonate,
+            impersonate_groups,
+            api_server_endpoint: found_cluster.cluster.server.clone(),
+            ca_data,
+            verify_ssl_certs: true,
+        };
+        Ok(conf)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn loads_kubeconfig_with_cluster_ca_file() {
+        let file = "src/config/test-data/kubeconfig-with-ca-file.yaml";
+        let user_agent = "my-user-agent";
+        let loaded =
+            load_kubeconfig(user_agent.to_string(), file).expect("failed to load kubeconfig");
+        let expected = CAData::File("src/config/test-data/./dummy-ca.crt".to_string());
+        assert_eq!(Some(expected), loaded.ca_data);
+    }
 }
