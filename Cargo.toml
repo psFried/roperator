@@ -1,6 +1,6 @@
 [package]
 name = "roperator"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["pfried <philipsfried@gmail.com>"]
 edition = "2018"
 description = "Easily create Kubernetes Operators with Rust"
