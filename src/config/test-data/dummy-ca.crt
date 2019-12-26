@@ -1,0 +1,1 @@
+This is not a real certificate, and the file contents don't matter. This file just needs to exist, so that we can test the resolution of relative paths in a kubeconfig file.
