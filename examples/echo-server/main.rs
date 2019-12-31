@@ -66,7 +66,7 @@ fn main() {
     // now we run the operator, passing in our handler function
     let err = run_operator(operator_config, handle_sync);
     // `run_operator` will never return under normal circumstances, so we only need to handle the sad path here
-    log::error!("Error running operator: {:?}", err);
+    log::error!("Error running operator: {}", err);
     std::process::exit(1);
 }
 
