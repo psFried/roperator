@@ -50,7 +50,7 @@ pub struct EchoServerStatus {
 
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "roperator=info");
+        std::env::set_var("RUST_LOG", "roperator=info,warn");
     }
     env_logger::init();
 
