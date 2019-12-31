@@ -273,6 +273,16 @@ pub mod coordination_k8s_io {
     }
 }
 
+pub mod events_k8s_io {
+    def_types! {
+        @nogroupmod, "events.k8s.io", [
+            v1beta1 => [
+                Event ~ events
+            ]
+        ]
+    }
+}
+
 pub mod extensions {
     def_types! {
         @nogroupmod, "extensions", [
@@ -283,6 +293,21 @@ pub mod extensions {
                 NetworkPolicy ~ networkpolicies,
                 PodSecurityPolicy ~ podsecuritypolicies,
                 ReplicaSet ~ replicasets
+            ]
+        ]
+    }
+}
+
+pub mod networking_k8s_io {
+    def_types! {
+        @nogroupmod, "networking.k8s.io", [
+            v1beta1 => [
+                Ingress ~ ingresses,
+                NetworkPolicy ~ networkpolicies
+            ],
+            v1 => [
+                Ingress ~ ingresses,
+                NetworkPolicy ~ networkpolicies
             ]
         ]
     }
