@@ -19,7 +19,9 @@ use regex::bytes::Regex;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use std::fs::File;
 use std::io;
+use std::io::Read;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -125,6 +127,26 @@ impl Client {
                 ssl.set_ca_file(path.as_str())?;
             }
             None => {}
+        }
+
+        if let Credentials::PemPath {
+            ref certificate_path,
+            ref private_key_path,
+        } = config.credentials
+        {
+            let mut file = File::open(certificate_path)?;
+            let mut file_content_cert = vec![];
+            file.read_to_end(&mut file_content_cert)?;
+
+            let mut file = File::open(private_key_path)?;
+            let mut file_content_key = vec![];
+            file.read_to_end(&mut file_content_key)?;
+
+            let cert = X509::from_pem(file_content_cert.as_slice())?;
+            let pkey = PKey::private_key_from_pem(file_content_key.as_slice())?;
+            ssl.set_certificate(&*cert)?; // &* is to convert from X509 to &X509Ref where X509 impls Deref to X509Ref
+            ssl.set_private_key(&*pkey)?; // same as above
+            ssl.check_private_key()?; // ensures that the provided private key and certificate actually go together
         }
 
         if let Credentials::Pem {

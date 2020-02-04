@@ -188,6 +188,11 @@ pub enum Credentials {
         /// The private key that corresponds to the certificate above
         private_key_base64: String,
     },
+
+    PemPath {
+        certificate_path: String,
+        private_key_path: String,
+    },
 }
 
 /// Configuration for how to connect to the Kubernetes API server and authenticate. This configuration

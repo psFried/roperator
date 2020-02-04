@@ -102,6 +102,19 @@ fn get_credentials(user: &UserInfo) -> Result<Credentials, KubeConfigError> {
         return get_exec_token(exec).map(Credentials::Header);
     }
 
+    if let Some(certificate_path) = user.client_certificate.as_ref() {
+        let private_key_path = user.client_key.as_ref().ok_or_else(|| {
+            KubeConfigError::InvalidKubeconfig(
+                "'client-certificate' is specified, but 'client-key' is missing".to_owned(),
+            )
+        })?;
+
+        return Ok(Credentials::PemPath {
+            certificate_path: certificate_path.clone(),
+            private_key_path: private_key_path.clone(),
+        });
+    }
+
     if let Some(certificate) = user.client_certificate_data.as_ref() {
         let private_key = user.client_key_data.as_ref().ok_or_else(|| {
             KubeConfigError::InvalidKubeconfig(
@@ -189,6 +202,11 @@ struct UserInfo {
     pub client_certificate_data: Option<String>,
     #[serde(rename = "client-key-data")]
     pub client_key_data: Option<String>,
+
+    #[serde(rename = "client-certificate")]
+    pub client_certificate: Option<String>,
+    #[serde(rename = "client-key")]
+    pub client_key: Option<String>,
 
     #[serde(rename = "as")]
     pub as_user: Option<String>,
