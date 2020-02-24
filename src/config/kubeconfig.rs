@@ -158,7 +158,7 @@ fn get_exec_token(exec: &Exec) -> Result<String, KubeConfigError> {
         exec.command,
         credential.status.expiration_timestamp
     );
-    Ok(credential.status.token)
+    Ok(format!("Bearer {}", credential.status.token))
 }
 
 /// used only for deserializing the output of the `exec` command for retrieving credentials
