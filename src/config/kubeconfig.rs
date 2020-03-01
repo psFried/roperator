@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 const MISSING_CREDENTIAL_MESSAGE: &str = "No supported credentials found in kubeconfig file for the selected context. Only token, username/password, client certificate, and exec are currently supported. Please file an issue if there's another mechanism that you need";
 const NO_HOME_DIR_MESSAGE: &str = "Unable to determine HOME directory to load ~/.kube/config";
 
+/// Error representing a problem with loading a kubeconfig file, or creating a `ClientConfig`
+/// from it.
 #[derive(Debug)]
 pub enum KubeConfigError {
     Io(io::Error),
@@ -76,7 +78,7 @@ pub fn load_kubeconfig(
             ),
         ))
     })?;
-    kubeconfig.resolve(user_agent, dir)
+    kubeconfig.create_client_config(user_agent, dir)
 }
 
 pub fn load_from_kubeconfig(user_agent: String) -> Result<ClientConfig, KubeConfigError> {
@@ -87,16 +89,14 @@ pub fn load_from_kubeconfig(user_agent: String) -> Result<ClientConfig, KubeConf
 fn get_credentials(user: &UserInfo) -> Result<Credentials, KubeConfigError> {
     if let Some(token) = user.token.as_ref() {
         log::debug!("Using auth token from kubeconfig");
-        return Ok(Credentials::Header(format!("Bearer {}", token)));
+        return Ok(Credentials::base64_bearer_token(token));
     }
     if let Some(username) = user.username.as_ref() {
         let pass = user.password.as_ref().ok_or_else(|| {
             KubeConfigError::InvalidKubeconfig("Username is specified but not password".to_owned())
         })?;
         log::debug!("Using username/password from kubeconfig");
-        let user_and_pass = format!("{}:{}", username, pass);
-        let encoded = base64::encode(&user_and_pass);
-        return Ok(Credentials::Header(format!("Basic {}", encoded)));
+        return Ok(Credentials::basic(username, pass));
     }
     if let Some(exec) = user.exec.as_ref() {
         return get_exec_token(exec).map(Credentials::Header);
@@ -249,8 +249,12 @@ struct Context {
     context: ContextInfo,
 }
 
+/// Represents a kubeconfig file that's been loaded into memory. This struct exposes
+/// some functions to help support some less common authentication and connection scenarios.
+/// For the vast majority of use cases, you can simply use the high-level functions for
+/// loading the kubeconfig file and creating a `ClientConfig` from it.
 #[derive(Deserialize, Debug, PartialEq, Clone)]
-struct KubeConfig {
+pub struct KubeConfig {
     #[serde(rename = "current-context")]
     current_context: String,
     clusters: Vec<Cluster>,
@@ -259,10 +263,46 @@ struct KubeConfig {
 }
 
 impl KubeConfig {
+    /// Attempts to load the kube config file from the usual locations. If the `KUBECONFIG`
+    /// environement variable is set, then the path specified by it is used. Otherwise,
+    /// it will look in `~/.kube/config`. If the file is not found, or if it is syntactically
+    /// or structurally invalid, then an error will be returned.
+    /// If the file is found, then the path that it was loaded from is also returned in
+    /// the tuple.
+    pub fn load() -> Result<(KubeConfig, PathBuf), KubeConfigError> {
+        let path = get_kubeconfig_path()?;
+        let conf = KubeConfig::load_file(&path)?;
+        Ok((conf, path))
+    }
+
+    /// Attempts to load the kube config file from the specified path. Returns an error if
+    /// the file is missing, or if it is syntactically or structurally invalid.
+    pub fn load_file(path: &Path) -> Result<KubeConfig, KubeConfigError> {
+        let reader = File::open(path)?;
+        let conf = serde_yaml::from_reader(reader)?;
+        Ok(conf)
+    }
+
+    /// Creates a `ClientConfig` from the data in this kube config. Returns an error if the kube config
+    /// file is missing required data. The `kubeconfig_parent_dir` is used in order to resolve relative
+    /// file paths that appear in the file, for example as paths to certificate files.
+    pub fn create_client_config(&self, user_agent: String, kubeconfig_parent_dir: &Path) -> Result<ClientConfig, KubeConfigError> {
+        self.resolve(user_agent, kubeconfig_parent_dir, None)
+    }
+
+    /// Creates a `ClientConfig`, the same as `create_client_config`, except that the given `credentials`
+    /// will be used _instead of_ trying to determine the credentials from the kube config file. This allows
+    /// you to work around cases where the authentication mechanism specified in the kubeconfig file is not
+    /// supported out of the box in roperator.
+    pub fn create_client_config_with_credentials(&self, user_agent: String, kubeconfig_parent_dir: &Path, credentials: Credentials) -> Result<ClientConfig, KubeConfigError> {
+        self.resolve(user_agent, kubeconfig_parent_dir, Some(credentials))
+    }
+
     fn resolve(
         &self,
         user_agent: String,
         kube_config_dir: &Path,
+        override_credentials: Option<Credentials>,
     ) -> Result<ClientConfig, KubeConfigError> {
         let current_context = self.current_context.as_str();
         let found_context = self
@@ -296,7 +336,11 @@ impl KubeConfig {
                 ))
             })?;
 
-        let credentials = get_credentials(&found_user.user)?;
+        let credentials = if let Some(creds) = override_credentials {
+            creds
+        } else {
+            get_credentials(&found_user.user)?
+        };
 
         let impersonate = found_user.user.as_user.clone();
         let impersonate_groups = found_user.user.as_groups.clone();
