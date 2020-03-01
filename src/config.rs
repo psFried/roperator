@@ -21,8 +21,7 @@ const SERVICE_ACCOUNT_TOKEN_PATH: &str = "/var/run/secrets/kubernetes.io/service
 const SERVICE_ACCOUNT_CA_PATH: &str = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt";
 const API_SERVER_HOSTNAME: &str = "kubernetes.default.svc";
 
-/// Error type for errors creating the `ClientConfig` from a kubeconfig file.
-pub use self::kubeconfig::KubeConfigError;
+pub use self::kubeconfig::{KubeConfig, KubeConfigError};
 
 /// What to do when there's a difference between the "desired" state of a given resource and the
 /// actual state of that resource in the cluster. The three options are:
@@ -193,6 +192,27 @@ pub enum Credentials {
         certificate_path: String,
         private_key_path: String,
     },
+}
+
+impl Credentials {
+
+    /// Creates a `Credentials` from a raw (_not_ base64 encoded) token
+    pub fn raw_bearer_token(raw_token: impl AsRef<str>) -> Credentials {
+        let encoded = base64::encode(raw_token.as_ref());
+        Credentials::Header(format!("Bearer {}", encoded))
+    }
+
+    /// Creates a `Credentials` from a token that is already base64 encoded
+    pub fn base64_bearer_token(base64_token: impl AsRef<str>) -> Credentials {
+        Credentials::Header(format!("Bearer {}", base64_token.as_ref()))
+    }
+
+    /// Creates a `Credentials` from a raw (_not_ base64 encoded) username and password
+    pub fn basic(raw_username: impl AsRef<str>, raw_password: impl AsRef<str>) -> Credentials {
+        let formatted = format!("{}:{}", raw_username.as_ref(), raw_password.as_ref());
+        let encoded = base64::encode(formatted.as_str());
+        Credentials::Header(format!("Basic {}", encoded))
+    }
 }
 
 /// Configuration for how to connect to the Kubernetes API server and authenticate. This configuration
