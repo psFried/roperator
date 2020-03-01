@@ -5,3 +5,10 @@ Cargo.lock
 /.vscode/
 
 *.bak
+
+# only used for testing the jekyll site locally
+docs/Gemfile
+docs/Gemfile.lock
+docs/.jekyll-cache
+docs/.sass-cache
+docs/_site

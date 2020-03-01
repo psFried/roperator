@@ -12,6 +12,10 @@ Introduces the core concepts.
 
 Walks through building an operator step by step.
 
+## [Reference Documentation](reference/index.html)
+
+Contains additional reference documentation, and docs on advanced topics.
+
 ## [API Documentation](https://docs.rs/roperator)
 
 Generated docs, hosted by docs.rs.
