@@ -10,6 +10,8 @@ readme = "README.md"
 keywords = ["kubernetes", "k8s", "operator"]
 categories = ["api-bindings", "config"]
 license = "MIT OR Apache-2.0"
+exclude = [ "docs/" ]
+maintenance = { status = "actively-developed" }
 
 [dependencies]
 hyper = { version = "=0.13.0-alpha.4", features = ["unstable-stream"]}
