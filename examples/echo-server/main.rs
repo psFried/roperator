@@ -2,9 +2,9 @@
 #[macro_use]
 extern crate serde_derive;
 
+use roperator::config::{ClientConfig, Credentials, KubeConfig};
 use roperator::prelude::{
-    k8s_types, run_operator, ChildConfig, Error, K8sResource, K8sType, OperatorConfig, SyncRequest,
-    SyncResponse,
+    k8s_types, ChildConfig, Error, K8sResource, K8sType, OperatorConfig, SyncRequest, SyncResponse,
 };
 use roperator::serde_json::{json, Value};
 
@@ -63,9 +63,32 @@ fn main() {
         .with_child(k8s_types::core::v1::Pod, ChildConfig::recreate())
         .with_child(k8s_types::core::v1::Service, ChildConfig::replace());
 
+    // This section is not necessary unless you want to run locally against a GKE cluster. This is only
+    // provided to make that easier, since it may be a common environment to test against.
+    // For most other clusters, you can just use `roperator::runner::run_operator` without providing a ClientConfig
+    let client_config_result = if let Ok(token) = std::env::var("ROPERATOR_AUTH_TOKEN") {
+        let credentials = Credentials::base64_bearer_token(token);
+        let (kubeconfig, kubeconfig_path) = KubeConfig::load().expect("failed to load kubeconfig");
+        let kubeconfig_parent_path = kubeconfig_path.parent().unwrap();
+        kubeconfig.create_client_config_with_credentials(
+            OPERATOR_NAME.to_string(),
+            kubeconfig_parent_path,
+            credentials,
+        )
+    } else {
+        ClientConfig::from_kubeconfig(OPERATOR_NAME.to_string())
+    };
+    let client_config =
+        client_config_result.expect("failed to resolve cluster data from kubeconfig");
+
     // now we run the operator, passing in our handler function
-    let err = run_operator(operator_config, handle_sync);
-    // `run_operator` will never return under normal circumstances, so we only need to handle the sad path here
+    let err = roperator::runner::run_operator_with_client_config(
+        operator_config,
+        client_config,
+        handle_sync,
+    );
+
+    // `run_operator_with_client_config` will never return under normal circumstances, so we only need to handle the sad path here
     log::error!("Error running operator: {}", err);
     std::process::exit(1);
 }
