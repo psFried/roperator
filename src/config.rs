@@ -195,7 +195,6 @@ pub enum Credentials {
 }
 
 impl Credentials {
-
     /// Creates a `Credentials` from a raw (_not_ base64 encoded) token
     pub fn raw_bearer_token(raw_token: impl AsRef<str>) -> Credentials {
         let encoded = base64::encode(raw_token.as_ref());

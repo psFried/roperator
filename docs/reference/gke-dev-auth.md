@@ -75,6 +75,7 @@ Since the token is only valid for an hour, it would be inconvenient to copy/past
 export GOOGLE_APPLICATION_CREDENTIALS=path/to/keyfile.json
 export ROPERATOR_AUTH_TOKEN=$(gcloud auth application-default print-access-token)
 
+# or cargo test or whatever else
 cargo run
 ```
 

@@ -286,7 +286,11 @@ impl KubeConfig {
     /// Creates a `ClientConfig` from the data in this kube config. Returns an error if the kube config
     /// file is missing required data. The `kubeconfig_parent_dir` is used in order to resolve relative
     /// file paths that appear in the file, for example as paths to certificate files.
-    pub fn create_client_config(&self, user_agent: String, kubeconfig_parent_dir: &Path) -> Result<ClientConfig, KubeConfigError> {
+    pub fn create_client_config(
+        &self,
+        user_agent: String,
+        kubeconfig_parent_dir: &Path,
+    ) -> Result<ClientConfig, KubeConfigError> {
         self.resolve(user_agent, kubeconfig_parent_dir, None)
     }
 
@@ -294,7 +298,12 @@ impl KubeConfig {
     /// will be used _instead of_ trying to determine the credentials from the kube config file. This allows
     /// you to work around cases where the authentication mechanism specified in the kubeconfig file is not
     /// supported out of the box in roperator.
-    pub fn create_client_config_with_credentials(&self, user_agent: String, kubeconfig_parent_dir: &Path, credentials: Credentials) -> Result<ClientConfig, KubeConfigError> {
+    pub fn create_client_config_with_credentials(
+        &self,
+        user_agent: String,
+        kubeconfig_parent_dir: &Path,
+        credentials: Credentials,
+    ) -> Result<ClientConfig, KubeConfigError> {
         self.resolve(user_agent, kubeconfig_parent_dir, Some(credentials))
     }
 
