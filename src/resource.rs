@@ -75,6 +75,12 @@ impl K8sResource {
         self.0
     }
 
+    /// Returns `true` if this resource is of the given type (matches the apiVersion and kind)
+    pub fn is_type(&self, k8s_type: &K8sType) -> bool {
+        self.api_version() == k8s_type.api_version &&
+            self.kind() == k8s_type.kind
+    }
+
     /// returns the `metadata.resourceVersion`, which is guaranteed to exist
     pub fn get_resource_version(&self) -> &str {
         self.str_value("/metadata/resourceVersion").unwrap()
@@ -239,7 +245,7 @@ impl<'a> std::fmt::Display for PairRef<'a> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct K8sTypeRef<'a>(pub &'a str, pub &'a str);
 impl<'a> K8sTypeRef<'a> {
     pub fn new(api_version: &'a str, kind: &'a str) -> Self {
@@ -268,6 +274,18 @@ impl<'a> std::fmt::Display for K8sTypeRef<'a> {
 impl<'a> std::cmp::PartialEq<K8sType> for K8sTypeRef<'a> {
     fn eq(&self, rhs: &K8sType) -> bool {
         self.api_version() == rhs.api_version && self.kind() == rhs.kind
+    }
+}
+
+impl<'a> From<&'_ K8sType> for K8sTypeRef<'a> {
+    fn from(k8s_type: &K8sType) -> K8sTypeRef<'static> {
+        K8sTypeRef(k8s_type.api_version, k8s_type.kind)
+    }
+}
+
+impl <'a> From<(&'a str, &'a str)> for K8sTypeRef<'a> {
+    fn from((api_version, kind): (&'a str, &'a str)) -> K8sTypeRef<'a> {
+        K8sTypeRef(api_version, kind)
     }
 }
 
