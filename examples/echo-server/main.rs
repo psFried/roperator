@@ -106,9 +106,7 @@ fn handle_sync(request: &SyncRequest) -> Result<SyncResponse, Error> {
 
 /// Returns the json value that should be set on the parent EchoServer
 fn get_current_status_message(request: &SyncRequest) -> String {
-    let children = request.children();
-    let pods = children.of_type_raw("v1", "Pod");
-    let pod: Option<&K8sResource> = pods.first();
+    let pod = request.children().of_type(("v1", "Pod")).first();
     pod.and_then(|p| p.pointer("/status/message").and_then(Value::as_str))
         .unwrap_or("Waiting for Pod to be initialized")
         .to_owned()
