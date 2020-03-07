@@ -20,4 +20,6 @@ Contains additional reference documentation, and docs on advanced topics.
 
 Generated docs, hosted by docs.rs.
 
+## [Upgrade Guide](guide/upgrade_guide.md)
 
+For information on upgrading from older versions.
