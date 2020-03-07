@@ -426,7 +426,7 @@ fn create_child_handler(req: &SyncRequest) -> Result<SyncResponse, Error> {
     });
 
     let children = req.children();
-    let test_child_ones = children.of_type_raw(CHILD_ONE_TYPE.api_version, CHILD_ONE_TYPE.kind);
+    let test_child_ones = children.of_type(CHILD_ONE_TYPE);
     let count = test_child_ones.iter().count();
 
     let message = if count == 0 {
