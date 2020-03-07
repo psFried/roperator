@@ -145,9 +145,9 @@ impl<'a, 'b: 'a> RawView<'a, 'b> {
         self.iter().count()
     }
 
-    pub fn as_type<T: DeserializeOwned>(self) -> TypedView<'a, 'b, T> {
+    pub fn as_type<T: DeserializeOwned>(&self) -> TypedView<'a, 'b, T> {
         TypedView {
-            raw: self,
+            raw: self.clone(),
             _phantom: PhantomData,
         }
     }
