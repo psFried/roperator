@@ -43,53 +43,6 @@ impl SyncRequest {
     pub fn children(&self) -> RequestChildren {
         RequestChildren(self)
     }
-
-    /// Returns an iterator over the child resources that have the given apiVersion and kind
-    pub fn iter_children_with_type<'a, 'b: 'a>(
-        &'a self,
-        api_version: &'b str,
-        kind: &'b str,
-    ) -> impl Iterator<Item = &'a K8sResource> {
-        let type_ref = K8sTypeRef::new(api_version, kind);
-        self.children
-            .iter()
-            .filter(move |child| child.get_type_ref() == type_ref)
-    }
-
-    /// Finds a child resource with the given type and id, and returns a reference to the raw json.
-    /// The namespace can be an empty str for resources that are not namespaced
-    pub fn raw_child<'a, 'b>(
-        &'a self,
-        api_version: &'b str,
-        kind: &'b str,
-        namespace: &'b str,
-        name: &'b str,
-    ) -> Option<&'a K8sResource> {
-        let id = ObjectIdRef::new(namespace, name);
-        let type_ref = K8sTypeRef::new(api_version, kind);
-        self.children
-            .iter()
-            .find(move |child| child.get_type_ref() == type_ref && child.get_object_id() == id)
-    }
-
-    /// returns true if the request contains a child with the given type and id.
-    /// The namespace can be an empty str for resources that are not namespaced
-    pub fn has_child(&self, api_version: &str, kind: &str, namespace: &str, name: &str) -> bool {
-        self.raw_child(api_version, kind, namespace, name).is_some()
-    }
-
-    /// Finds a child resource with the given type and id, and attempts to deserialize it.
-    /// The namespace can be an empty str for resources that are not namespaced
-    pub fn deserialize_child<T: DeserializeOwned>(
-        &self,
-        api_version: &str,
-        kind: &str,
-        namespace: &str,
-        name: &str,
-    ) -> Option<Result<T, serde_json::Error>> {
-        self.raw_child(api_version, kind, namespace, name)
-            .map(|child| serde_json::from_value(child.clone().into_value()))
-    }
 }
 
 /// A view of a subset of child resouces that share a given apiVersion and kind. This view has accessors
