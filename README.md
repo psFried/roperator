@@ -15,6 +15,10 @@ The core of your operator is a _sync_ function that gets passed a snapshot view 
 
 The [EchoServer example](examples/echo-server/README.md) is a good first example to look at to see how everythign fits together end to end.
 
+### Master branch status
+
+The master branch includes work for the upcoming 0.2.0 release. This includes a few minor breaking changes. If you want to submit a bugfix PR against the 0.1.x branch, then use `release-0.1` as the base branch for that.
+
 ### Dependencies
 
 - Rust 1.39 or later
