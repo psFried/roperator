@@ -39,9 +39,13 @@ impl std::error::Error for InvalidResourceError {}
 
 /// A `K8sResource` represents a Kubernetes resource that actually exists in the cluster.
 /// It is a transparent wrapper around a `serde_json::Value`, with some validation and some
-/// accessors for common properties.
+/// accessors for common properties. This type can represent a Kubernetes resource of any
+/// apiVersion/kind. If you want to deserialize this to a specific struct type (e.g. a Pod),
+/// you can use `into_type::<Pod>()` to deserialize it.
 /// This type is _not_ used to represent resources that haven't been created yet, since
-/// the fields that are populated by the api server would be missing.
+/// the fields that are populated by the api server would be missing. Resources that don't actually
+/// exist in the cluster are instead represented by a plain `serde_json::Value`, since we make almost
+/// no assumptions about those.
 #[derive(PartialEq, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct K8sResource(Value);
@@ -59,6 +63,8 @@ impl std::fmt::Display for K8sResource {
 }
 
 impl K8sResource {
+    /// Attemnpts to create a `K8sResource` from a raw json value. Returns an error if the json
+    /// is missing any required fields
     pub fn from_value(value: Value) -> Result<K8sResource, InvalidResourceError> {
         if let Err(msg) = K8sResource::validate(&value) {
             Err(InvalidResourceError {
@@ -70,6 +76,11 @@ impl K8sResource {
         }
     }
 
+    /// Convenience function that attempts to deserialize this resource as the given struct type.
+    pub fn into_type<T: serde::de::DeserializeOwned>(self) -> Result<T, serde_json::Error> {
+        serde_json::from_value(self.into_value())
+    }
+
     /// unwrap the resource into the raw json Value
     pub fn into_value(self) -> Value {
         self.0
@@ -77,8 +88,7 @@ impl K8sResource {
 
     /// Returns `true` if this resource is of the given type (matches the apiVersion and kind)
     pub fn is_type(&self, k8s_type: &K8sType) -> bool {
-        self.api_version() == k8s_type.api_version &&
-            self.kind() == k8s_type.kind
+        self.api_version() == k8s_type.api_version && self.kind() == k8s_type.kind
     }
 
     /// returns the `metadata.resourceVersion`, which is guaranteed to exist
@@ -167,6 +177,9 @@ impl K8sResource {
         Ok(())
     }
 
+    /// retrieves a `&str` value from one of the fields within the json.
+    /// The `pointer` is an [RFC6901](https://tools.ietf.org/html/rfc6901) json pointer.
+    /// Returns None if the given field is missing or of a different type
     pub fn str_value(&self, pointer: &str) -> Option<&str> {
         self.0.pointer(pointer).and_then(Value::as_str)
     }
@@ -283,7 +296,7 @@ impl<'a> From<&'_ K8sType> for K8sTypeRef<'a> {
     }
 }
 
-impl <'a> From<(&'a str, &'a str)> for K8sTypeRef<'a> {
+impl<'a> From<(&'a str, &'a str)> for K8sTypeRef<'a> {
     fn from((api_version, kind): (&'a str, &'a str)) -> K8sTypeRef<'a> {
         K8sTypeRef(api_version, kind)
     }

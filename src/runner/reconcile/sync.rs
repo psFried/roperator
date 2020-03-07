@@ -1,6 +1,5 @@
 use crate::config::UpdateStrategy;
 use crate::handler::{Handler, SyncRequest, SyncResponse};
-use crate::k8s_types::K8sType;
 use crate::resource::{
     object_id, type_ref, InvalidResourceError, JsonObject, K8sResource, ObjectId, ObjectIdRef,
 };
@@ -206,7 +205,10 @@ async fn update_children(
                     )
                 })?
         };
-        let existing_child = find_existing_child(req, child_config.child_type, &child_id);
+        let existing_child = req
+            .children()
+            .of_type(child_config.child_type)
+            .get(child_id.namespace().unwrap_or(""), child_id.name());
         let update_required =
             is_child_update_required(&parent_id, child_config, existing_child, &child_id, &child)?;
         add_parent_references(runtime_config, parent_id.name(), parent_uid, &mut child)?;
@@ -272,15 +274,6 @@ enum UpdateType {
     Create,
     Replace(String),
     Delete,
-}
-
-fn find_existing_child<'a, 'b>(
-    req: &'a SyncRequest,
-    child_type: &K8sType,
-    child_id: &'b ObjectIdRef<'_>,
-) -> Option<&'a K8sResource> {
-    let (namespace, name) = child_id.as_parts();
-    req.raw_child(child_type.api_version, child_type.kind, namespace, name)
 }
 
 fn is_child_update_required(
