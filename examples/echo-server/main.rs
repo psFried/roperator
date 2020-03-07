@@ -4,7 +4,7 @@ extern crate serde_derive;
 
 use roperator::config::{ClientConfig, Credentials, KubeConfig};
 use roperator::prelude::{
-    k8s_types, ChildConfig, Error, K8sResource, K8sType, OperatorConfig, SyncRequest, SyncResponse,
+    k8s_types, ChildConfig, Error, K8sType, OperatorConfig, SyncRequest, SyncResponse,
 };
 use roperator::serde_json::{json, Value};
 

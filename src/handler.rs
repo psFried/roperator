@@ -12,7 +12,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::fmt::{self, Debug};
 
-pub use self::request::{SyncRequest, RequestChildren, TypedView, TypedIter, RawView};
+pub use self::request::{RawView, RequestChildren, SyncRequest, TypedIter, TypedView};
 
 /// The return value from your handler function, which has the status to set for the parent, as well as any
 /// desired child resources. Any existing child resources that are **not** included in this response **will be deleted**.

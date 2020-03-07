@@ -1,10 +1,9 @@
-use crate::resource::{K8sResource, K8sTypeRef, ObjectIdRef};
 use crate::k8s_types::K8sType;
+use crate::resource::{K8sResource, K8sTypeRef};
 
 use serde::de::DeserializeOwned;
-use std::marker::PhantomData;
 use std::fmt::{self, Debug};
-
+use std::marker::PhantomData;
 
 /// The type passed to the Handler that provides a snapshot view of the parent Custom Resource and all of the children
 /// as they exist in the Kubernetes cluster. The handler will be passed an immutable reference to this struct.
@@ -35,7 +34,7 @@ impl SyncRequest {
     /// Deserialize the parent resource as the given type. It's common to have a struct representation of your CRD, so you
     /// don't have to work with the json directly. This function allows you to easily do just that.
     pub fn deserialize_parent<T: DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
-        serde_json::from_value(self.parent.clone().into_value())
+        self.parent.clone().into_type()
     }
 
     /// Returns a view of just the children of this request, which is useful for passing to a function that determines the current
@@ -54,7 +53,6 @@ pub struct TypedView<'a, 'b: 'a, T: DeserializeOwned> {
 }
 
 impl<'a, 'b: 'a, T: DeserializeOwned> TypedView<'a, 'b, T> {
-
     /// Returns true if the given child exists in this `SyncRequest`, otherwise false. Namespace
     /// can be an empty str for resources that are not namespaced.
     pub fn exists(&self, namespace: &str, name: &str) -> bool {
@@ -63,9 +61,7 @@ impl<'a, 'b: 'a, T: DeserializeOwned> TypedView<'a, 'b, T> {
 
     /// Attempts to deserialize the resource with the given namespace and name
     pub fn get(&self, namespace: &str, name: &str) -> Option<Result<T, serde_json::Error>> {
-        self.raw.get(namespace, name).map(|c| {
-            serde_json::from_value(c.clone().into_value())
-        })
+        self.raw.get(namespace, name).map(|c| c.clone().into_type())
     }
 
     /// Returns the first item with this apiVersion and kind, attempting to deserialize it
@@ -97,7 +93,6 @@ impl<'a, 'b: 'a, T: DeserializeOwned> TypedView<'a, 'b, T> {
     pub fn count(&self) -> usize {
         self.as_raw().count()
     }
-
 }
 
 /// A view of raw `K8sResource` children that share the same apiVersion and kind, which provides
@@ -116,13 +111,11 @@ impl<'a, 'b: 'a> RawView<'a, 'b> {
         self.get(namespace, name).is_some()
     }
 
-
     /// Returns a reference to the raw `K8sResource` of this type if it exists.
     /// Namespace can be an empty str for resources that are not namespaced
     pub fn get(&self, namespace: &str, name: &str) -> Option<&'a K8sResource> {
-        self.iter().find(|res| {
-            res.namespace().unwrap_or("") == namespace && res.name() == name
-        })
+        self.iter()
+            .find(|res| res.namespace().unwrap_or("") == namespace && res.name() == name)
     }
 
     /// Returns an iterator over all of the resources of this type
@@ -155,7 +148,7 @@ impl<'a, 'b: 'a> RawView<'a, 'b> {
     pub fn as_type<T: DeserializeOwned>(self) -> TypedView<'a, 'b, T> {
         TypedView {
             raw: self,
-            _phantom: PhantomData
+            _phantom: PhantomData,
         }
     }
 
@@ -164,7 +157,6 @@ impl<'a, 'b: 'a> RawView<'a, 'b> {
         self.type_ref
     }
 }
-
 
 /// An iterator over references to child resources with a specific apiVersion and kind.
 pub struct RawIter<'a, 'b: 'a> {
@@ -194,9 +186,7 @@ impl<'a, 'b: 'a, T: DeserializeOwned> Iterator for TypedIter<'a, 'b, T> {
     type Item = Result<T, serde_json::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|res| {
-            serde_json::from_value(res.clone().into_value())
-        })
+        self.inner.next().map(|res| res.clone().into_type())
     }
 }
 
@@ -206,7 +196,6 @@ impl<'a, 'b: 'a, T: DeserializeOwned> Iterator for TypedIter<'a, 'b, T> {
 #[derive(Debug)]
 pub struct RequestChildren<'a>(&'a SyncRequest);
 impl<'a> RequestChildren<'a> {
-
     /// Provides a view of all the children with the given apiVersion/kind. The returned view provides a variety of functions
     /// to provide access to the matching subset of child resources
     pub fn of_type<'b: 'a>(&self, type_ref: impl Into<K8sTypeRef<'b>>) -> RawView<'a, 'b> {
@@ -218,7 +207,10 @@ impl<'a> RequestChildren<'a> {
 
     /// Provides a typed view of all the children with the given apiVersion/kind. This view provides typed accessor functions
     /// to return deserailized children
-    pub fn with_type<'b: 'a, T: DeserializeOwned>(&self, k8s_type: &'static K8sType) -> TypedView<'a, 'b, T> {
+    pub fn with_type<'b: 'a, T: DeserializeOwned>(
+        &self,
+        k8s_type: &'static K8sType,
+    ) -> TypedView<'a, 'b, T> {
         self.of_type(k8s_type).as_type::<T>()
     }
 
@@ -227,7 +219,6 @@ impl<'a> RequestChildren<'a> {
         self.0.children.iter()
     }
 }
-
 
 #[cfg(test)]
 mod test {
@@ -238,14 +229,17 @@ mod test {
     macro_rules! resource {
         ($toks:tt) => {
             K8sResource::from_value(json!($toks)).expect("invalid test resource")
-        }
+        };
     }
 
     #[test]
     fn request_children_allows_retrieving_first_resource_with_type() {
         let request = test_request();
 
-        let first_service = request.children().with_type::<AnyResource>(crate::k8s_types::core::v1::Service).first()
+        let first_service = request
+            .children()
+            .with_type::<AnyResource>(crate::k8s_types::core::v1::Service)
+            .first()
             .expect("no pod found")
             .expect("failed to deserialize child");
         assert_eq!("sldfkj", first_service.metadata.uid.as_str());
@@ -255,7 +249,9 @@ mod test {
     fn request_children_allows_retrieving_all_children_with_type() {
         let request = test_request();
 
-        let all_pods = request.children().with_type::<AnyResource>(crate::k8s_types::core::v1::Pod)
+        let all_pods = request
+            .children()
+            .with_type::<AnyResource>(crate::k8s_types::core::v1::Pod)
             .iter()
             .collect::<Result<Vec<AnyResource>, serde_json::Error>>()
             .expect("failed to deserialize child");
@@ -270,7 +266,9 @@ mod test {
     fn request_children_allows_retrieving_a_specific_typed_child() {
         let request = test_request();
 
-        let result = request.children().with_type::<AnyResource>(crate::k8s_types::core::v1::Pod)
+        let result = request
+            .children()
+            .with_type::<AnyResource>(crate::k8s_types::core::v1::Pod)
             .get("foo", "baz")
             .expect("failed to retrieve pod")
             .expect("failed to deserialize pod");
@@ -278,12 +276,14 @@ mod test {
         assert_eq!("def456", result.metadata.uid);
     }
 
-
     #[test]
     fn request_children_allows_retrieving_first_raw_resource_matching_type() {
         let request = test_request();
 
-        let first_service = request.children().of_type(crate::k8s_types::core::v1::Service).first()
+        let first_service = request
+            .children()
+            .of_type(crate::k8s_types::core::v1::Service)
+            .first()
             .expect("no pod found");
         assert_eq!("sldfkj", first_service.uid());
     }
@@ -291,7 +291,9 @@ mod test {
     #[test]
     fn request_children_allows_retrieving_a_specific_raw_child() {
         let request = test_request();
-        let result = request.children().of_type(crate::k8s_types::core::v1::Pod)
+        let result = request
+            .children()
+            .of_type(crate::k8s_types::core::v1::Pod)
             .get("foo", "baz")
             .expect("failed to retrieve pod");
 
@@ -301,7 +303,9 @@ mod test {
     #[test]
     fn count_returns_number_of_matching_children() {
         let request = test_request();
-        let pods = request.children().with_type::<AnyResource>(crate::k8s_types::core::v1::Pod);
+        let pods = request
+            .children()
+            .with_type::<AnyResource>(crate::k8s_types::core::v1::Pod);
 
         assert_eq!(2, pods.count());
 
@@ -336,7 +340,10 @@ mod test {
 
         assert_eq!(0, kids.with_type::<AnyResource>(non_existant_type).count());
         assert!(kids.with_type::<AnyResource>(non_existant_type).is_empty());
-        assert!(kids.with_type::<AnyResource>(non_existant_type).first().is_none());
+        assert!(kids
+            .with_type::<AnyResource>(non_existant_type)
+            .first()
+            .is_none());
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
@@ -348,7 +355,6 @@ mod test {
         uid: String,
     }
 
-
     #[derive(Debug, Deserialize, PartialEq)]
     #[serde(rename_all = "camelCase")]
     struct AnyResource {
@@ -359,7 +365,7 @@ mod test {
 
     fn test_request() -> SyncRequest {
         SyncRequest {
-            parent: resource!{{
+            parent: resource! {{
                 "apiVersion": "foo.com/v1",
                 "kind": "MyThing",
                 "metadata": {
@@ -416,9 +422,8 @@ mod test {
                     "spec": {
                         "containers": [ ]
                     }
-                })
-            ]
+                }),
+            ],
         }
     }
-
 }
