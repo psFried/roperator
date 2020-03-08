@@ -1,7 +1,7 @@
 use crate::config::UpdateStrategy;
 use crate::handler::{Handler, SyncRequest, SyncResponse};
 use crate::resource::{
-    object_id, type_ref, InvalidResourceError, JsonObject, K8sResource, ObjectId, ObjectIdRef,
+    type_ref, InvalidResourceError, JsonObject, K8sResource, ObjectIdRef, ResourceJson,
 };
 use crate::runner::client::{self, Client};
 use crate::runner::informer::{EventType, ResourceMessage};
@@ -10,11 +10,11 @@ use crate::runner::reconcile::{
     does_finalizer_exist, update_status_if_different, SyncHandler, UpdateError,
 };
 use crate::runner::{duration_to_millis, ChildRuntimeConfig, RuntimeConfig};
+use crate::runner::resource_map::IdSet;
 
 use serde_json::{json, Value};
 use tokio::timer::delay_for;
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -27,7 +27,8 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
         runtime_config,
         parent_index_key,
     } = handler;
-    let parent_id = request.parent.get_object_id().into_owned();
+    let parent_id = request.parent.get_object_id().to_owned();
+    let parent_id_ref = parent_id.as_id_ref();
 
     let start_time = Instant::now();
     let result = private_handle_sync(start_time, request, handler, client, &*runtime_config).await;
@@ -46,7 +47,7 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
             false
         }
         Err(err) => {
-            runtime_config.metrics.parent_sync_error(&parent_id);
+            runtime_config.metrics.parent_sync_error(&parent_id_ref);
             log::error!("Error while syncing parent: {}: {:?}", parent_id, err);
             // we'll delay for a while before sending the message that we've finished so that we can
             // prevent the main loop from re-trying too soon. Eventually we should implement a backoff
@@ -104,7 +105,7 @@ async fn update_all(
 ) -> Result<(), UpdateError> {
     let start_time = Instant::now();
     let SyncResponse { status, children } = handler_response;
-    let parent_id = request.parent.get_object_id().into_owned();
+    let parent_id = request.parent.get_object_id().to_owned();
     update_status_if_different(&request.parent, &client, runtime_config, status).await?;
     log::debug!(
         "Successfully updated status for parent: {} in {}ms",
@@ -139,7 +140,7 @@ async fn add_finalizer_to_parent(
 async fn delete_undesired_children(
     client: &Client,
     runtime_config: &RuntimeConfig,
-    desired_children: &HashSet<ObjectId>,
+    desired_children: &IdSet,
     sync_request: &SyncRequest,
 ) -> Result<(), client::Error> {
     for existing_child in sync_request.children.iter() {
@@ -161,14 +162,14 @@ async fn update_children(
     runtime_config: &RuntimeConfig,
     req: &SyncRequest,
     response_children: Vec<Value>,
-) -> Result<HashSet<ObjectIdRef<'static>>, UpdateError> {
+) -> Result<IdSet, UpdateError> {
     let parent_uid = req.parent.uid();
     let parent_id = req.parent.get_object_id();
-    let mut child_ids = HashSet::new();
+    let mut child_ids = IdSet::new();
     for mut child in response_children {
-        let child_id = object_id(&child)
+        let child_id = child.get_id_ref()
             .ok_or_else(|| InvalidResourceError::new("missing name", child.clone()))?
-            .into_owned();
+            .to_owned();
 
         // ensure that the child has the same namespace as the parent. This is a deliberate constraint that
         // we place on users of this library, as having non-namespaced children of namespaced parents would
@@ -210,7 +211,7 @@ async fn update_children(
             .of_type(child_config.child_type)
             .get(child_id.namespace().unwrap_or(""), child_id.name());
         let update_required =
-            is_child_update_required(&parent_id, child_config, existing_child, &child_id, &child)?;
+            is_child_update_required(&parent_id, child_config, existing_child, &child_id.as_id_ref(), &child)?;
         add_parent_references(runtime_config, parent_id.name(), parent_uid, &mut child)?;
         if let Some(update_type) = update_required {
             let start_time = Instant::now();
@@ -256,13 +257,14 @@ async fn do_child_update(
                     Value::String(resource_version),
                 );
             }
-            let child_id = object_id(&desired_child).unwrap();
+            // the desired child should have already been validated
+            let child_id = desired_child.get_id_ref().expect("failed to get id from desired child resource");
             client
                 .replace_resource(k8s_type, &child_id, &desired_child)
                 .await
         }
         UpdateType::Delete => {
-            let child_id = object_id(&desired_child).unwrap();
+            let child_id = desired_child.get_id_ref().expect("failed to get id from desired child resource");
             // TODO: Deleting a resource could return a 409 error if it's already being deleted. Figure out how to deal with that
             client.delete_resource(k8s_type, &child_id).await
         }

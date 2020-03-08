@@ -654,7 +654,7 @@ impl Handler for InstrumentedHandler {
             ref records,
         } = self;
 
-        let parent_id = req.parent.get_object_id().into_owned();
+        let parent_id = req.parent.get_object_id().to_owned();
         let mut records_lock = records.write().unwrap();
         let record = records_lock
             .entry(parent_id)
@@ -672,7 +672,7 @@ impl Handler for InstrumentedHandler {
             ref records,
         } = self;
 
-        let parent_id = req.parent.get_object_id().into_owned();
+        let parent_id = req.parent.get_object_id().to_owned();
         let mut records_lock = records.write().unwrap();
         let record = records_lock
             .entry(parent_id)
