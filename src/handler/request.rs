@@ -1,5 +1,8 @@
+//! Contains the `SyncRequest`, which is passed to the `Handler` function, as well as some
+//! helpers for accessing and deserializing resources from the request.
+//!
 use crate::k8s_types::K8sType;
-use crate::resource::{K8sResource, K8sTypeRef};
+use crate::resource::{K8sResource, K8sTypeRef, ResourceJson, ObjectIdRef};
 
 use serde::de::DeserializeOwned;
 use std::fmt::{self, Debug};
@@ -45,7 +48,8 @@ impl SyncRequest {
 }
 
 /// A view of a subset of child resouces that share a given apiVersion and kind. This view has accessors
-/// for retrieving deserialized child resources.
+/// for retrieving deserialized child resources. These accessors all accept `impl Into<ObjectIdRef<'_>>`
+/// as their input, which allows passing a variety of types, including `&ObjectId` and `(&str, &str)`.
 #[derive(Debug, Clone)]
 pub struct TypedView<'a, 'b: 'a, T: DeserializeOwned> {
     raw: RawView<'a, 'b>,
@@ -55,13 +59,13 @@ pub struct TypedView<'a, 'b: 'a, T: DeserializeOwned> {
 impl<'a, 'b: 'a, T: DeserializeOwned> TypedView<'a, 'b, T> {
     /// Returns true if the given child exists in this `SyncRequest`, otherwise false. Namespace
     /// can be an empty str for resources that are not namespaced.
-    pub fn exists(&self, namespace: &str, name: &str) -> bool {
-        self.raw.exists(namespace, name)
+    pub fn exists<'c>(&self, id: impl Into<ObjectIdRef<'c>>) -> bool {
+        self.raw.exists(id)
     }
 
     /// Attempts to deserialize the resource with the given namespace and name
-    pub fn get(&self, namespace: &str, name: &str) -> Option<Result<T, serde_json::Error>> {
-        self.raw.get(namespace, name).map(|c| c.clone().into_type())
+    pub fn get<'c>(&self, id: impl Into<ObjectIdRef<'c>>) -> Option<Result<T, serde_json::Error>> {
+        self.raw.get(id).map(|c| c.clone().into_type())
     }
 
     /// Returns the first item with this apiVersion and kind, attempting to deserialize it
@@ -95,8 +99,17 @@ impl<'a, 'b: 'a, T: DeserializeOwned> TypedView<'a, 'b, T> {
     }
 }
 
+impl<'a, 'b: 'a, T: DeserializeOwned> IntoIterator for TypedView<'a, 'b, T> {
+    type Item = Result<T, serde_json::Error>;
+    type IntoIter = TypedIter<'a, 'b, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// A view of raw `K8sResource` children that share the same apiVersion and kind, which provides
-/// convenient accessor functions
+/// convenient accessor functions. These accessors all accept `impl Into<ObjectIdRef<'_>>`
+/// as their input, which allows passing a variety of types, including `&ObjectId` and `(&str, &str)`.
 #[derive(Debug, Clone)]
 pub struct RawView<'a, 'b: 'a> {
     // children: &'a RequestChildren<'a>,
@@ -105,17 +118,17 @@ pub struct RawView<'a, 'b: 'a> {
 }
 
 impl<'a, 'b: 'a> RawView<'a, 'b> {
-    /// Returns true if the given child exists in this `SyncRequest`, otherwise false. Namespace
-    /// can be an empty str for resources that are not namespaced.
-    pub fn exists(&self, namespace: &str, name: &str) -> bool {
-        self.get(namespace, name).is_some()
+    /// Returns true if the given child exists in this `SyncRequest`, otherwise false.
+    pub fn exists<'c>(&self, id: impl Into<ObjectIdRef<'c>>) -> bool {
+        self.get(id).is_some()
     }
 
     /// Returns a reference to the raw `K8sResource` of this type if it exists.
     /// Namespace can be an empty str for resources that are not namespaced
-    pub fn get(&self, namespace: &str, name: &str) -> Option<&'a K8sResource> {
+    pub fn get<'c>(&self, id: impl Into<ObjectIdRef<'c>>) -> Option<&'a K8sResource> {
+        let id = id.into();
         self.iter()
-            .find(|res| res.namespace().unwrap_or("") == namespace && res.name() == name)
+            .find(|res| res.is_id(&id))
     }
 
     /// Returns an iterator over all of the resources of this type
@@ -158,6 +171,15 @@ impl<'a, 'b: 'a> RawView<'a, 'b> {
     }
 }
 
+impl<'a, 'b: 'a> IntoIterator for RawView<'a, 'b> {
+    type Item = &'a K8sResource;
+    type IntoIter = RawIter<'a, 'b>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// An iterator over references to child resources with a specific apiVersion and kind.
 pub struct RawIter<'a, 'b: 'a> {
     inner: std::slice::Iter<'a, K8sResource>,
@@ -193,6 +215,46 @@ impl<'a, 'b: 'a, T: DeserializeOwned> Iterator for TypedIter<'a, 'b, T> {
 /// A view of all of the children from a `SyncRequest`, which has convenient accessors for getting (and optionally deserializing)
 /// child resources. This view represents a snapshot of the known state of all the children that are related to a specific parent.
 /// The parent status should be computed from this view, NOT from the _desired_ children returned from your handler.
+///
+/// This view provides a number of functions that return other views of particular types of resources. For example,
+/// you could get a view of just all the Pods in the request. These view functions all accept any type that implements
+/// `Into<K8sTypeRef<'_>>`, which includes `&K8sType` and `(&str, &str)`.
+///
+/// ## Examples
+///
+/// Loop through all the Pods in the request:
+/// ```rust
+/// use roperator::k8s_types::core::v1::Pod;
+///
+/// # let request = roperator::handler::request::test_request();
+/// for pod in request.children().of_type(Pod) {
+///     println!("Example Pod with id: {}", pod.get_object_id());
+/// }
+/// ```
+///
+/// Check if a Service exists:
+/// ```
+/// # let request = roperator::handler::request::test_request();
+/// let service_exists: bool = request.children()
+///     .of_type(("v1", "Service"))
+///     .exists(("foo", "bar"));
+/// assert!(service_exists);
+/// ```
+///
+/// Get a typed view, which will automatically deserialize the child resources as the provided type:
+/// ```
+/// extern crate roperator;
+/// extern crate k8s_openapi;
+///
+/// use k8s_openapi::api::core::v1::Service;
+/// # let request = roperator::handler::request::test_request();
+/// let service: Service = request.children().of_type(("v1", "Service"))
+///     .as_type::<Service>()
+///     .first()
+///     .expect("no service found in request")
+///     .expect("failed to deserialize Service");
+/// ```
+///
 #[derive(Debug)]
 pub struct RequestChildren<'a>(&'a SyncRequest);
 impl<'a> RequestChildren<'a> {
@@ -220,17 +282,82 @@ impl<'a> RequestChildren<'a> {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::resource::K8sResource;
+
+#[cfg(any(feature = "test", test))]
+macro_rules! resource {
+    ($toks:tt) => {
+        K8sResource::from_value(json!($toks)).expect("invalid test resource")
+    };
+}
+
+#[cfg(any(feature = "test", test))]
+pub fn test_request() -> SyncRequest {
     use serde_json::json;
 
-    macro_rules! resource {
-        ($toks:tt) => {
-            K8sResource::from_value(json!($toks)).expect("invalid test resource")
-        };
+    SyncRequest {
+        parent: resource! {{
+            "apiVersion": "foo.com/v1",
+            "kind": "MyThing",
+            "metadata": {
+                "namespace": "foo",
+                "name": "bar",
+                "resourceVersion": "1234455",
+                "uid": "abc123"
+            },
+            "spec": {
+                "a": 1,
+                "b": "two"
+            }
+        }},
+        children: vec![
+            resource!({
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {
+                    "namespace": "foo",
+                    "name": "bar",
+                    "resourceVersion": "1234455",
+                    "uid": "abc123"
+                },
+                "spec": {
+                    "containers": [ ]
+                }
+            }),
+            resource!({
+                "apiVersion": "v1",
+                "kind": "Service",
+                "metadata": {
+                    "namespace": "foo",
+                    "name": "bar",
+                    "resourceVersion": "234",
+                    "uid": "sldfkj"
+                },
+                "spec": {
+                    "selector": {
+                        "oooohhhh": "weeee"
+                    }
+                }
+            }),
+            resource!({
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {
+                    "namespace": "foo",
+                    "name": "baz",
+                    "resourceVersion": "543231",
+                    "uid": "def456"
+                },
+                "spec": {
+                    "containers": [ ]
+                }
+            }),
+        ],
     }
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
 
     #[test]
     fn request_children_allows_retrieving_first_resource_with_type() {
@@ -269,7 +396,7 @@ mod test {
         let result = request
             .children()
             .with_type::<AnyResource>(crate::k8s_types::core::v1::Pod)
-            .get("foo", "baz")
+            .get(("foo", "baz"))
             .expect("failed to retrieve pod")
             .expect("failed to deserialize pod");
 
@@ -294,7 +421,7 @@ mod test {
         let result = request
             .children()
             .of_type(crate::k8s_types::core::v1::Pod)
-            .get("foo", "baz")
+            .get(("foo", "baz"))
             .expect("failed to retrieve pod");
 
         assert_eq!("def456", result.uid());
@@ -363,67 +490,4 @@ mod test {
         metadata: MyMeta,
     }
 
-    fn test_request() -> SyncRequest {
-        SyncRequest {
-            parent: resource! {{
-                "apiVersion": "foo.com/v1",
-                "kind": "MyThing",
-                "metadata": {
-                    "namespace": "foo",
-                    "name": "bar",
-                    "resourceVersion": "1234455",
-                    "uid": "abc123"
-                },
-                "spec": {
-                    "a": 1,
-                    "b": "two"
-                }
-            }},
-            children: vec![
-                resource!({
-                    "apiVersion": "v1",
-                    "kind": "Pod",
-                    "metadata": {
-                        "namespace": "foo",
-                        "name": "bar",
-                        "resourceVersion": "1234455",
-                        "uid": "abc123"
-                    },
-                    "spec": {
-                        "containers": [ ]
-                    }
-                }),
-                resource!({
-                    "apiVersion": "v1",
-                    "kind": "Service",
-                    "metadata": {
-                        "namespace": "foo",
-                        "name": "bar",
-                        "resourceVersion": "234",
-                        "uid": "sldfkj"
-                    },
-                    "spec": {
-                        "selector": {
-                            "matchLabels": {
-                                "oooohhhh": "weeee"
-                            }
-                        }
-                    }
-                }),
-                resource!({
-                    "apiVersion": "v1",
-                    "kind": "Pod",
-                    "metadata": {
-                        "namespace": "foo",
-                        "name": "baz",
-                        "resourceVersion": "543231",
-                        "uid": "def456"
-                    },
-                    "spec": {
-                        "containers": [ ]
-                    }
-                }),
-            ],
-        }
-    }
 }

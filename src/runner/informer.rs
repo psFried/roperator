@@ -567,7 +567,7 @@ impl<I: ReverseIndex> ResourceMonitorBackend<I> {
             }
         };
         let resource = K8sResource::from_value(object)?;
-        let resource_version = resource.get_resource_version().to_owned();
+        let resource_version = resource.resource_version().to_owned();
 
         let resource_id = resource.get_object_id().to_owned();
         let resource_type = self.k8s_type;

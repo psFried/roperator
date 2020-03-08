@@ -88,7 +88,7 @@ pub(crate) async fn update_status_if_different(
 ) -> Result<(), UpdateError> {
     let parent_id = existing_parent.get_object_id();
     let old_status = existing_parent.status();
-    let parent_resource_version = existing_parent.get_resource_version();
+    let parent_resource_version = existing_parent.resource_version();
     let current_gen = existing_parent.generation();
 
     if let Some(s) = new_status.as_object_mut() {

@@ -45,6 +45,9 @@ env_logger = "0.7.1"
 [features]
 default = []
 testkit = []
+# The reason we do this is because doctests don't get cfg(test)
+# See: https://github.com/rust-lang/cargo/issues/4669
+test = []
 
 [[test]]
 name = "integration_tests"
