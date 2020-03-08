@@ -27,7 +27,8 @@ impl Debug for Metrics {
 }
 
 fn id_labels<'a, 'b>(id: &'a ObjectIdRef<'b>) -> [&'a str; 2] {
-    [id.as_parts().0, id.as_parts().1]
+    let ObjectIdRef {namespace, name } = *id;
+    [namespace, name]
 }
 
 // 5, 10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120

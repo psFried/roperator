@@ -1,9 +1,14 @@
+pub(crate) mod object_id;
+mod json_ext;
+
 use crate::k8s_types::K8sType;
 
 use serde_json::Value;
 
-use std::borrow::Cow;
 use std::fmt::{self, Debug};
+
+pub use self::json_ext::ResourceJson;
+pub use self::object_id::{ObjectId, ObjectIdRef};
 
 pub type JsonObject = serde_json::Map<String, Value>;
 
@@ -185,6 +190,24 @@ impl K8sResource {
     }
 }
 
+impl json_ext::ResourceJson for K8sResource {
+    fn get_api_version(&self) -> Option<&str> {
+        Some(self.api_version())
+    }
+
+    fn get_kind(&self) -> Option<&str> {
+        Some(self.kind())
+    }
+
+    fn get_namespace(&self) -> Option<&str> {
+        self.namespace()
+    }
+
+    fn get_name(&self) -> Option<&str> {
+        Some(self.name())
+    }
+}
+
 impl std::convert::AsRef<Value> for K8sResource {
     fn as_ref(&self) -> &Value {
         &self.0
@@ -211,11 +234,6 @@ impl Into<Value> for K8sResource {
     }
 }
 
-pub fn object_id(json: &Value) -> Option<ObjectIdRef> {
-    let namespace = str_value(json, "/metadata/namespace").unwrap_or("");
-    str_value(json, "/metadata/name").map(|name| ObjectIdRef::new(namespace, name))
-}
-
 pub fn type_ref(json: &Value) -> Option<K8sTypeRef<'_>> {
     str_value(json, "/apiVersion")
         .and_then(|api_version| str_value(json, "/kind").map(|kind| K8sTypeRef(api_version, kind)))
@@ -223,39 +241,6 @@ pub fn type_ref(json: &Value) -> Option<K8sTypeRef<'_>> {
 
 pub fn str_value<'a, 'b>(json: &'a Value, pointer: &'b str) -> Option<&'a str> {
     json.pointer(pointer).and_then(Value::as_str)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct PairRef<'a>(Cow<'a, str>, Cow<'a, str>);
-
-impl<'a> PairRef<'a> {
-    pub fn into_owned(self) -> PairRef<'static> {
-        let PairRef(a, b) = self;
-        let a: Cow<'static, str> = Cow::Owned(a.into_owned());
-        let b: Cow<'static, str> = Cow::Owned(b.into_owned());
-        PairRef(a, b)
-    }
-
-    pub fn to_owned(&self) -> PairRef<'static> {
-        let PairRef(ref a, ref b) = self;
-        let a: Cow<'static, str> = Cow::Owned(a.clone().into_owned());
-        let b: Cow<'static, str> = Cow::Owned(b.clone().into_owned());
-        PairRef(a, b)
-    }
-
-    pub fn new(a: impl Into<Cow<'a, str>>, b: impl Into<Cow<'a, str>>) -> Self {
-        PairRef(a.into(), b.into())
-    }
-
-    pub fn as_parts(&self) -> (&str, &str) {
-        (self.0.as_ref(), self.1.as_ref())
-    }
-}
-
-impl<'a> std::fmt::Display for PairRef<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}/{}", self.0, self.1)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -280,7 +265,7 @@ impl<'a> K8sTypeRef<'a> {
 
 impl<'a> std::fmt::Display for K8sTypeRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}/{}", self.0, self.1)
     }
 }
 
@@ -302,46 +287,3 @@ impl<'a> From<(&'a str, &'a str)> for K8sTypeRef<'a> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ObjectIdRef<'a>(PairRef<'a>);
-impl<'a> ObjectIdRef<'a> {
-    pub fn into_owned(self) -> ObjectId {
-        ObjectIdRef(self.0.into_owned())
-    }
-
-    pub fn to_owned(&self) -> ObjectId {
-        ObjectIdRef(self.0.to_owned())
-    }
-
-    pub fn new(namespace: impl Into<Cow<'a, str>>, name: impl Into<Cow<'a, str>>) -> Self {
-        ObjectIdRef(PairRef::new(namespace, name))
-    }
-
-    pub fn as_parts(&self) -> (&str, &str) {
-        self.0.as_parts()
-    }
-
-    pub fn empty() -> ObjectId {
-        ObjectIdRef::new("", "")
-    }
-
-    pub fn name(&self) -> &str {
-        (self.0).1.as_ref()
-    }
-
-    pub fn namespace(&self) -> Option<&str> {
-        if (self.0).0.is_empty() {
-            None
-        } else {
-            Some((self.0).0.as_ref())
-        }
-    }
-}
-
-pub type ObjectId = ObjectIdRef<'static>;
-
-impl<'a> std::fmt::Display for ObjectIdRef<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}

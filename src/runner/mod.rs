@@ -1,6 +1,7 @@
 mod client;
 mod informer;
 mod metrics;
+pub(crate) mod resource_map;
 pub(crate) mod reconcile;
 mod server;
 
@@ -367,7 +368,7 @@ impl OperatorState {
             }
         };
 
-        let parent_id = parent.get_object_id().into_owned();
+        let parent_id = parent.get_object_id().to_owned();
         log::info!(
             "Starting sync request for parent: '{}' with uid: '{}'",
             parent_id,
@@ -507,7 +508,7 @@ impl OperatorState {
             }
             EventType::Deleted if resource_type == self.runtime_config.parent_type => {
                 log::debug!("Parent resource '{}' has been deleted", resource_id);
-                self.runtime_config.metrics.parent_deleted(&resource_id);
+                self.runtime_config.metrics.parent_deleted(&resource_id.as_id_ref());
             }
             _ => {
                 if to_sync.insert(uid) {

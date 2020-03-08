@@ -18,7 +18,8 @@ pub(crate) async fn handle_finalize(handler: SyncHandler) {
         parent_index_key,
     } = handler;
 
-    let parent_id = request.parent.get_object_id().into_owned();
+    let parent_id = request.parent.get_object_id().to_owned();
+    let parent_id_ref = parent_id.as_id_ref();
     let parent_type = runtime_config.parent_type;
 
     let result = get_finalize_result(request, handler, client, &*runtime_config).await;
@@ -31,7 +32,7 @@ pub(crate) async fn handle_finalize(handler: SyncHandler) {
             retry
         }
         Err(err) => {
-            runtime_config.metrics.parent_sync_error(&parent_id);
+            runtime_config.metrics.parent_sync_error(&parent_id_ref);
             log::error!("Failed to finalize parent: {}, err: {}", parent_id, err);
             // here again, we should change this to use an incremental backoff instead of these fixed delays
             tokio::timer::delay_for(Duration::from_secs(5)).await;

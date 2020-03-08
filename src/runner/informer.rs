@@ -1,50 +1,31 @@
 use crate::error::Error;
 use crate::k8s_types::K8sType;
-use crate::resource::{InvalidResourceError, K8sResource, ObjectId, ObjectIdRef};
+use crate::resource::{InvalidResourceError, K8sResource, ObjectId, };
+
+#[cfg(feature = "testkit")]
+use crate::resource::ObjectIdRef;
+
 use crate::runner::client::{ApiError, Client, Error as ClientError, ObjectList, WatchEvent};
 use crate::runner::metrics::WatcherMetrics;
+use crate::runner::resource_map::{ResourceMap, IdSet};
 
 use serde_json::Value;
 use tokio::executor::Executor;
 use tokio::sync::mpsc::{error::SendError, Sender};
 use tokio::sync::{Mutex, MutexGuard};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::{self, Debug, Display};
 use std::hash::Hash;
 use std::sync::Arc;
 
-#[derive(Debug)]
-struct ResourceCache(HashMap<ObjectId, K8sResource>);
-
-impl ResourceCache {
-    pub fn new() -> Self {
-        Self(HashMap::new())
-    }
-
-    pub fn insert(&mut self, res: K8sResource) -> Option<K8sResource> {
-        let id = res.get_object_id();
-        self.0.insert(id.into_owned(), res)
-    }
-
-    pub fn remove(&mut self, id: &ObjectId) {
-        self.0.remove(id);
-    }
-
-    pub fn get_copy(&self, id: &ObjectIdRef) -> Option<K8sResource> {
-        self.0.get(id).cloned()
-    }
-
-    pub fn clear(&mut self) {
-        self.0.clear();
-    }
-}
 
 #[derive(Debug)]
 pub struct LabelToIdIndex {
     label_name: String,
-    entries: HashMap<String, HashSet<ObjectId>>,
+    entries: HashMap<String, IdSet>,
 }
+
 impl LabelToIdIndex {
     pub fn new(label_name: String) -> Self {
         Self {
@@ -55,7 +36,7 @@ impl LabelToIdIndex {
 }
 
 impl ReverseIndex for LabelToIdIndex {
-    type Value = HashSet<ObjectId>;
+    type Value = IdSet;
 
     fn get_key<'a, 'b>(&'a self, res: &'b K8sResource) -> Option<&'b str> {
         res.get_label_value(self.label_name.as_str())
@@ -65,10 +46,10 @@ impl ReverseIndex for LabelToIdIndex {
         let set = self
             .entries
             .entry(key.to_owned())
-            .or_insert_with(HashSet::new);
+            .or_insert_with(IdSet::new);
         let id = res.get_object_id();
         if !set.contains(&id) {
-            set.insert(id.into_owned());
+            set.insert(id.to_owned());
         }
     }
 
@@ -78,7 +59,7 @@ impl ReverseIndex for LabelToIdIndex {
         }
     }
 
-    fn remove_all(&mut self, key: &str) -> Option<HashSet<ObjectId>> {
+    fn remove_all(&mut self, key: &str) -> Option<IdSet> {
         self.entries.remove(key)
     }
 
@@ -86,7 +67,7 @@ impl ReverseIndex for LabelToIdIndex {
         self.entries.clear();
     }
 
-    fn lookup<'a, 'b>(&'a self, key: &'b str) -> Option<&'a HashSet<ObjectId>> {
+    fn lookup<'a, 'b>(&'a self, key: &'b str) -> Option<&'a IdSet> {
         self.entries.get(key)
     }
 }
@@ -109,7 +90,7 @@ impl ReverseIndex for UidToIdIndex {
 
     fn insert(&mut self, key: &str, value: &K8sResource) {
         self.0
-            .insert(key.to_owned(), value.get_object_id().into_owned());
+            .insert(key.to_owned(), value.get_object_id().to_owned());
     }
 
     fn remove_one(&mut self, key: &str, _: &ObjectId) {
@@ -142,7 +123,7 @@ pub trait ReverseIndex: Send + 'static {
 
 #[derive(Debug)]
 struct CacheAndIndex<I: ReverseIndex> {
-    cache: ResourceCache,
+    cache: ResourceMap,
     index: I,
     error: Option<Error>,
     is_initialized: bool,
@@ -152,7 +133,7 @@ impl<I: ReverseIndex> CacheAndIndex<I> {
     fn new(index: I) -> Self {
         CacheAndIndex {
             error: Some(MonitorBackendErr::StateUnininitialized.into_boxed_error()),
-            cache: ResourceCache::new(),
+            cache: ResourceMap::new(),
             index,
             is_initialized: false,
         }
@@ -170,7 +151,7 @@ impl<I: ReverseIndex> CacheAndIndex<I> {
         if let Some(k) = key {
             self.index.remove_one(k, &id);
         }
-        self.cache.remove(&id);
+        self.cache.remove(id);
     }
 
     fn clear_all(&mut self) {
@@ -182,7 +163,7 @@ impl<I: ReverseIndex> CacheAndIndex<I> {
     }
 
     fn resource_count(&self) -> usize {
-        self.cache.0.len()
+        self.cache.len()
     }
 }
 
@@ -201,7 +182,7 @@ impl CacheAndIndex<LabelToIdIndex> {
     pub fn get_all_resources_by_index_key(&self, key: &str) -> Vec<K8sResource> {
         let mut results = Vec::new();
         if let Some(ids) = self.index.lookup(key) {
-            for id in ids {
+            for id in ids.iter() {
                 let obj = self
                     .cache
                     .get_copy(id)
@@ -588,7 +569,7 @@ impl<I: ReverseIndex> ResourceMonitorBackend<I> {
         let resource = K8sResource::from_value(object)?;
         let resource_version = resource.get_resource_version().to_owned();
 
-        let resource_id = resource.get_object_id().into_owned();
+        let resource_id = resource.get_object_id().to_owned();
         let resource_type = self.k8s_type;
         let mut cache_and_index = self.cache_and_index.lock().await;
         let index_key = cache_and_index.index.get_key(&resource).map(String::from);
@@ -649,7 +630,7 @@ impl<I: ReverseIndex> ResourceMonitorBackend<I> {
             let index_key = cache_and_index.index.get_key(&resource).map(String::from);
             let event_type = get_update_event_type(resource.as_ref());
             let resource_type = self.k8s_type;
-            let resource_id = resource.get_object_id().into_owned();
+            let resource_id = resource.get_object_id().to_owned();
             let message = ResourceMessage {
                 event_type,
                 resource_type,
