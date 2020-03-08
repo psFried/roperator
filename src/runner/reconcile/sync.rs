@@ -209,7 +209,7 @@ async fn update_children(
         let existing_child = req
             .children()
             .of_type(child_config.child_type)
-            .get(child_id.namespace().unwrap_or(""), child_id.name());
+            .get(&child_id);
         let update_required =
             is_child_update_required(&parent_id, child_config, existing_child, &child_id.as_id_ref(), &child)?;
         add_parent_references(runtime_config, parent_id.name(), parent_uid, &mut child)?;
@@ -346,7 +346,7 @@ fn determine_update_type(
         // since deletion can sometimes take quite a while due to finalizers needing to run.
         Some(UpdateType::Delete)
     } else {
-        let resource_version = existing_child.get_resource_version();
+        let resource_version = existing_child.resource_version();
         Some(UpdateType::Replace(resource_version.to_owned()))
     }
 }

@@ -49,7 +49,7 @@ impl Patch {
             "metadata": {
                 "namespace": resource.get_object_id().namespace(),
                 "name": resource.get_object_id().name(),
-                "resourceVersion": resource.get_resource_version(),
+                "resourceVersion": resource.resource_version(),
                 "finalizers": finalizers,
             }
         });
@@ -71,7 +71,7 @@ impl Patch {
             "metadata": {
                 "namespace": resource.get_object_id().namespace(),
                 "name": resource.get_object_id().name(),
-                "resourceVersion": resource.get_resource_version(),
+                "resourceVersion": resource.resource_version(),
                 "finalizers": finalizers,
             }
         });

@@ -31,3 +31,7 @@ There were a number of breaking changes in the 0.2.0 release. Most of them were 
 
 - Changed the struct declaration to specify separate lifetimes for the inner `SyncRequest` and the `K8sTypeRef`. This should not impact most usages, but may if you're written out the full type on a variable
 
+There were also a number of breaking changes in the `roperator::resource` module. These were mostly to simplify dealing with Kubernetes resources that are represented as plain JSON. Every resource has a type (represented by an `apiVersion` and `kind`) and an `id` (represented by `metadata.namespace` and `metadata.name`). The representations of these have been simplified, and various things were added/changed to allow functions to accept a variety of representations of these.
+
+- `roperator::resource::object_id` function was removed. Use the `get_object_id` function from the `ResourceJson` trait instead.
+

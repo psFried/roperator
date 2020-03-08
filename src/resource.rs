@@ -91,13 +91,17 @@ impl K8sResource {
         self.0
     }
 
+    pub fn is_id(&self, id: &ObjectIdRef) -> bool {
+        self.get_object_id() == *id
+    }
+
     /// Returns `true` if this resource is of the given type (matches the apiVersion and kind)
     pub fn is_type(&self, k8s_type: &K8sType) -> bool {
         self.api_version() == k8s_type.api_version && self.kind() == k8s_type.kind
     }
 
     /// returns the `metadata.resourceVersion`, which is guaranteed to exist
-    pub fn get_resource_version(&self) -> &str {
+    pub fn resource_version(&self) -> &str {
         self.str_value("/metadata/resourceVersion").unwrap()
     }
 

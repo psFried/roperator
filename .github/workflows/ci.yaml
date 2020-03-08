@@ -20,7 +20,7 @@ jobs:
           export KUBECONFIG="$(kind get kubeconfig-path)"
           kubectl cluster-info
           kubectl apply -f tests/resources/
-          cargo test --features testkit
+          cargo test --features 'testkit test'
 
   fmt:
     name: Rustfmt

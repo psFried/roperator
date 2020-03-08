@@ -5,6 +5,11 @@
 //! snapshot of the state of a given parent resource, along with any children that currently exist for it.
 //! This request struct has lots of functions on it for accessing and deserializing child resources.
 
+// only expose the reqeust mod during tests.
+#[cfg(feature = "test")]
+pub mod request;
+
+#[cfg(not(feature = "test"))]
 mod request;
 
 use crate::error::Error;
