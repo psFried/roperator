@@ -1,7 +1,7 @@
 use crate::config::UpdateStrategy;
 use crate::handler::{Handler, SyncRequest, SyncResponse};
 use crate::resource::{
-    type_ref, InvalidResourceError, JsonObject, K8sResource, ObjectIdRef, ResourceJson,
+    InvalidResourceError, JsonObject, K8sResource, ObjectIdRef, ResourceJson,
 };
 use crate::runner::client::{self, Client};
 use crate::runner::informer::{EventType, ResourceMessage};
@@ -193,7 +193,7 @@ async fn update_children(
         }
 
         let child_config: &ChildRuntimeConfig = {
-            let child_type_ref = type_ref(&child).ok_or_else(|| {
+            let child_type_ref = child.get_type_ref().ok_or_else(|| {
                 InvalidResourceError::new("missing either apiVersion or kind", child.clone())
             })?;
 
