@@ -1,8 +1,8 @@
 mod client;
 mod informer;
 mod metrics;
-pub(crate) mod resource_map;
 pub(crate) mod reconcile;
+pub(crate) mod resource_map;
 mod server;
 
 #[cfg(feature = "testkit")]
@@ -508,7 +508,9 @@ impl OperatorState {
             }
             EventType::Deleted if resource_type == self.runtime_config.parent_type => {
                 log::debug!("Parent resource '{}' has been deleted", resource_id);
-                self.runtime_config.metrics.parent_deleted(&resource_id.as_id_ref());
+                self.runtime_config
+                    .metrics
+                    .parent_deleted(&resource_id.as_id_ref());
             }
             _ => {
                 if to_sync.insert(uid) {

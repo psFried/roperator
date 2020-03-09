@@ -2,7 +2,7 @@
 //! helpers for accessing and deserializing resources from the request.
 //!
 use crate::k8s_types::K8sType;
-use crate::resource::{K8sResource, K8sTypeRef, ResourceJson, ObjectIdRef};
+use crate::resource::{K8sResource, K8sTypeRef, ObjectIdRef, ResourceJson};
 
 use serde::de::DeserializeOwned;
 use std::fmt::{self, Debug};
@@ -51,12 +51,12 @@ impl SyncRequest {
 /// for retrieving deserialized child resources. These accessors all accept `impl Into<ObjectIdRef<'_>>`
 /// as their input, which allows passing a variety of types, including `&ObjectId` and `(&str, &str)`.
 #[derive(Debug, Clone)]
-pub struct TypedView<'a, 'b: 'a, T: DeserializeOwned> {
+pub struct TypedView<'a, 'b, T: DeserializeOwned> {
     raw: RawView<'a, 'b>,
     _phantom: PhantomData<T>,
 }
 
-impl<'a, 'b: 'a, T: DeserializeOwned> TypedView<'a, 'b, T> {
+impl<'a, 'b, T: DeserializeOwned> TypedView<'a, 'b, T> {
     /// Returns true if the given child exists in this `SyncRequest`, otherwise false. Namespace
     /// can be an empty str for resources that are not namespaced.
     pub fn exists<'c>(&self, id: impl Into<ObjectIdRef<'c>>) -> bool {
@@ -99,7 +99,7 @@ impl<'a, 'b: 'a, T: DeserializeOwned> TypedView<'a, 'b, T> {
     }
 }
 
-impl<'a, 'b: 'a, T: DeserializeOwned> IntoIterator for TypedView<'a, 'b, T> {
+impl<'a, 'b, T: DeserializeOwned> IntoIterator for TypedView<'a, 'b, T> {
     type Item = Result<T, serde_json::Error>;
     type IntoIter = TypedIter<'a, 'b, T>;
     fn into_iter(self) -> Self::IntoIter {
@@ -111,13 +111,13 @@ impl<'a, 'b: 'a, T: DeserializeOwned> IntoIterator for TypedView<'a, 'b, T> {
 /// convenient accessor functions. These accessors all accept `impl Into<ObjectIdRef<'_>>`
 /// as their input, which allows passing a variety of types, including `&ObjectId` and `(&str, &str)`.
 #[derive(Debug, Clone)]
-pub struct RawView<'a, 'b: 'a> {
+pub struct RawView<'a, 'b> {
     // children: &'a RequestChildren<'a>,
     req: &'a SyncRequest,
     type_ref: K8sTypeRef<'b>,
 }
 
-impl<'a, 'b: 'a> RawView<'a, 'b> {
+impl<'a, 'b> RawView<'a, 'b> {
     /// Returns true if the given child exists in this `SyncRequest`, otherwise false.
     pub fn exists<'c>(&self, id: impl Into<ObjectIdRef<'c>>) -> bool {
         self.get(id).is_some()
@@ -127,8 +127,7 @@ impl<'a, 'b: 'a> RawView<'a, 'b> {
     /// Namespace can be an empty str for resources that are not namespaced
     pub fn get<'c>(&self, id: impl Into<ObjectIdRef<'c>>) -> Option<&'a K8sResource> {
         let id = id.into();
-        self.iter()
-            .find(|res| res.is_id(&id))
+        self.iter().find(|res| res.is_id(&id))
     }
 
     /// Returns an iterator over all of the resources of this type
@@ -171,7 +170,7 @@ impl<'a, 'b: 'a> RawView<'a, 'b> {
     }
 }
 
-impl<'a, 'b: 'a> IntoIterator for RawView<'a, 'b> {
+impl<'a, 'b> IntoIterator for RawView<'a, 'b> {
     type Item = &'a K8sResource;
     type IntoIter = RawIter<'a, 'b>;
 
@@ -181,12 +180,12 @@ impl<'a, 'b: 'a> IntoIterator for RawView<'a, 'b> {
 }
 
 /// An iterator over references to child resources with a specific apiVersion and kind.
-pub struct RawIter<'a, 'b: 'a> {
+pub struct RawIter<'a, 'b> {
     inner: std::slice::Iter<'a, K8sResource>,
     type_ref: K8sTypeRef<'b>,
 }
 
-impl<'a, 'b: 'a> Iterator for RawIter<'a, 'b> {
+impl<'a, 'b> Iterator for RawIter<'a, 'b> {
     type Item = &'a K8sResource;
 
     fn next(&mut self) -> Option<&'a K8sResource> {
@@ -199,12 +198,14 @@ impl<'a, 'b: 'a> Iterator for RawIter<'a, 'b> {
     }
 }
 
-pub struct TypedIter<'a, 'b: 'a, T: DeserializeOwned> {
+/// An Iterator over deserialized resources that all share the same
+/// apiVersion and kind.
+pub struct TypedIter<'a, 'b, T: DeserializeOwned> {
     inner: RawIter<'a, 'b>,
     _phantom: PhantomData<T>,
 }
 
-impl<'a, 'b: 'a, T: DeserializeOwned> Iterator for TypedIter<'a, 'b, T> {
+impl<'a, 'b, T: DeserializeOwned> Iterator for TypedIter<'a, 'b, T> {
     type Item = Result<T, serde_json::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -260,16 +261,16 @@ pub struct RequestChildren<'a>(&'a SyncRequest);
 impl<'a> RequestChildren<'a> {
     /// Provides a view of all the children with the given apiVersion/kind. The returned view provides a variety of functions
     /// to provide access to the matching subset of child resources
-    pub fn of_type<'b: 'a>(&self, type_ref: impl Into<K8sTypeRef<'b>>) -> RawView<'a, 'b> {
+    pub fn of_type<'b>(&self, type_ref: impl Into<K8sTypeRef<'b>>) -> RawView<'a, 'b> {
         RawView {
             req: self.0,
             type_ref: type_ref.into(),
         }
     }
 
-    /// Provides a typed view of all the children with the given apiVersion/kind. This view provides typed accessor functions
-    /// to return deserailized children
-    pub fn with_type<'b: 'a, T: DeserializeOwned>(
+    /// Provides a typed view of all the children with the given apiVersion/kind. This view
+    /// provides typed accessor functions to return deserailized children
+    pub fn with_type<'b, T: DeserializeOwned>(
         &self,
         k8s_type: &'static K8sType,
     ) -> TypedView<'a, 'b, T> {
@@ -280,8 +281,25 @@ impl<'a> RequestChildren<'a> {
     pub fn iter(&self) -> impl Iterator<Item = &K8sResource> {
         self.0.children.iter()
     }
-}
 
+    /// Returns true if the request contains a resource with the same `apiVersion`, `kind`,
+    /// `metadata.namespace`, and `metadata.name` as the given `resource`.
+    ///
+    pub fn get_child_with_id<'b>(
+        &self,
+        resource: &'b serde_json::Value,
+    ) -> Option<&'a K8sResource> {
+        let type_id = resource
+            .get_type_ref()
+            .and_then(|v| resource.get_id_ref().map(move |id| (v, id)));
+
+        if let Some((k8s_type, id)) = type_id {
+            self.of_type(k8s_type).get(id)
+        } else {
+            panic!("contains_child_with_id called with argument that does not specify one of apiVersion, kind, metadata.name, resource: '{}'", resource);
+        }
+    }
+}
 
 #[cfg(any(feature = "test", test))]
 macro_rules! resource {
@@ -489,5 +507,4 @@ pub mod test {
         kind: String,
         metadata: MyMeta,
     }
-
 }

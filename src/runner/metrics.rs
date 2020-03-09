@@ -27,7 +27,7 @@ impl Debug for Metrics {
 }
 
 fn id_labels<'a, 'b>(id: &'a ObjectIdRef<'b>) -> [&'a str; 2] {
-    let ObjectIdRef {namespace, name } = *id;
+    let ObjectIdRef { namespace, name } = *id;
     [namespace, name]
 }
 
