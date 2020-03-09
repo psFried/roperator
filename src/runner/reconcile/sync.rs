@@ -1,8 +1,6 @@
 use crate::config::UpdateStrategy;
 use crate::handler::{Handler, SyncRequest, SyncResponse};
-use crate::resource::{
-    InvalidResourceError, JsonObject, K8sResource, ObjectIdRef, ResourceJson,
-};
+use crate::resource::{InvalidResourceError, JsonObject, K8sResource, ObjectIdRef, ResourceJson};
 use crate::runner::client::{self, Client};
 use crate::runner::informer::{EventType, ResourceMessage};
 use crate::runner::reconcile::compare::compare_values;

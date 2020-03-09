@@ -4,8 +4,8 @@
 use crate::k8s_types::K8sType;
 use crate::resource::{K8sResource, K8sTypeRef, ObjectIdRef, ResourceJson};
 
-use serde_json::Value;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 
@@ -313,10 +313,7 @@ impl<'a> RequestChildren<'a> {
     /// - `apiVersion`
     /// - `kind`
     /// - `metadata.name`
-    pub fn get_child_with_id<'b>(
-        &self,
-        resource: &'b Value,
-    ) -> Option<&'a K8sResource> {
+    pub fn get_child_with_id<'b>(&self, resource: &'b Value) -> Option<&'a K8sResource> {
         let type_id = resource
             .get_type_ref()
             .and_then(|v| resource.get_id_ref().map(move |id| (v, id)));
