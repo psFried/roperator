@@ -4,6 +4,7 @@
 use crate::k8s_types::K8sType;
 use crate::resource::{K8sResource, K8sTypeRef, ObjectIdRef, ResourceJson};
 
+use serde_json::Value;
 use serde::de::DeserializeOwned;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
@@ -282,12 +283,39 @@ impl<'a> RequestChildren<'a> {
         self.0.children.iter()
     }
 
-    /// Returns true if the request contains a resource with the same `apiVersion`, `kind`,
-    /// `metadata.namespace`, and `metadata.name` as the given `resource`.
+    /// Returns the matching resource if the request contains a resource with the
+    /// same `apiVersion`, `kind`, `metadata.namespace`, and `metadata.name` as
+    /// the given `resource`.
     ///
+    /// ### Example:
+    ///
+    /// ```rust
+    /// use roperator::k8s_types::core::v1::Service;
+    ///
+    /// # let request = roperator::handler::request::test_request();
+    /// let example_resource = serde_json::json!({
+    ///     "apiVersion": "v1",
+    ///     "kind": "Service",
+    ///     "metadata": {
+    ///         "namespace": "foo",
+    ///         "name": "bar"
+    ///     }
+    /// });
+    ///
+    /// let actual_service = request.children().get_child_with_id(&example_resource);
+    /// assert!(actual_service.is_some());
+    /// let same_service = request.children().of_type(Service).get(("foo", "bar"));
+    /// assert_eq!(actual_service, same_service);
+    /// ```
+    ///
+    /// **Panics** if the example `resource` json is missing any of the following fields:
+    ///
+    /// - `apiVersion`
+    /// - `kind`
+    /// - `metadata.name`
     pub fn get_child_with_id<'b>(
         &self,
-        resource: &'b serde_json::Value,
+        resource: &'b Value,
     ) -> Option<&'a K8sResource> {
         let type_id = resource
             .get_type_ref()
