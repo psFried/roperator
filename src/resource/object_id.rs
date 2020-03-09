@@ -32,10 +32,7 @@ pub struct ObjectId {
 impl ObjectId {
     /// create a new `ObjectId` from owned Strings
     pub fn new(namespace: String, name: String) -> ObjectId {
-        ObjectId {
-            namespace,
-            name,
-        }
+        ObjectId { namespace, name }
     }
 
     /// return an `ObjectIdRef` that borrows its fields from this id
@@ -58,7 +55,6 @@ impl ObjectId {
     }
 }
 
-
 impl Display for ObjectId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.as_id_ref().fmt(f)
@@ -75,10 +71,7 @@ pub struct ObjectIdRef<'a> {
 impl<'a> ObjectIdRef<'a> {
     /// Returns a new id with the given namespace and name fields
     pub fn new(namespace: &'a str, name: &'a str) -> ObjectIdRef<'a> {
-        ObjectIdRef {
-            namespace,
-            name,
-        }
+        ObjectIdRef { namespace, name }
     }
 
     /// Create an owned `ObjectId` by copying the borrowed fields to
@@ -114,15 +107,13 @@ impl<'a> Display for ObjectIdRef<'a> {
 
 impl<'a> PartialEq<ObjectIdRef<'a>> for ObjectId {
     fn eq(&self, other: &ObjectIdRef<'a>) -> bool {
-        self.namespace == other.namespace &&
-            self.name == other.name
+        self.namespace == other.namespace && self.name == other.name
     }
 }
 
 impl<'a> PartialEq<ObjectId> for ObjectIdRef<'a> {
     fn eq(&self, other: &ObjectId) -> bool {
-        self.namespace == other.namespace &&
-            self.name == other.name
+        self.namespace == other.namespace && self.name == other.name
     }
 }
 

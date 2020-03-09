@@ -17,9 +17,10 @@ impl<T> IdMap<T> {
     pub fn contains<'a>(&self, id: impl Into<ObjectIdRef<'a>>) -> bool {
         let id = id.into();
 
-        self.0.get(id.namespace).map(|by_name| {
-            by_name.contains_key(id.name)
-        }).unwrap_or(false)
+        self.0
+            .get(id.namespace)
+            .map(|by_name| by_name.contains_key(id.name))
+            .unwrap_or(false)
     }
 
     pub fn remove<'a>(&mut self, id: impl Into<ObjectIdRef<'a>>) {
@@ -41,7 +42,6 @@ impl<T> IdMap<T> {
 }
 
 impl IdMap<K8sResource> {
-
     pub fn insert(&mut self, resource: K8sResource) -> Option<K8sResource> {
         let ObjectId { namespace, name } = resource.get_object_id().to_owned();
         let by_name = self.0.entry(namespace).or_default();
@@ -71,14 +71,9 @@ impl IdMap<()> {
 
     pub fn iter(&self) -> impl Iterator<Item = ObjectIdRef> {
         self.0.iter().flat_map(|(namespace, by_name)| {
-            by_name.keys().map(move |name| {
-                ObjectIdRef {
-                    namespace,
-                    name,
-                }
-            })
+            by_name
+                .keys()
+                .map(move |name| ObjectIdRef { namespace, name })
         })
     }
 }
-
-

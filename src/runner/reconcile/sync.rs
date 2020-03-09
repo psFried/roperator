@@ -9,8 +9,8 @@ use crate::runner::reconcile::compare::compare_values;
 use crate::runner::reconcile::{
     does_finalizer_exist, update_status_if_different, SyncHandler, UpdateError,
 };
-use crate::runner::{duration_to_millis, ChildRuntimeConfig, RuntimeConfig};
 use crate::runner::resource_map::IdSet;
+use crate::runner::{duration_to_millis, ChildRuntimeConfig, RuntimeConfig};
 
 use serde_json::{json, Value};
 use tokio::timer::delay_for;
@@ -167,7 +167,8 @@ async fn update_children(
     let parent_id = req.parent.get_object_id();
     let mut child_ids = IdSet::new();
     for mut child in response_children {
-        let child_id = child.get_id_ref()
+        let child_id = child
+            .get_id_ref()
             .ok_or_else(|| InvalidResourceError::new("missing name", child.clone()))?
             .to_owned();
 
@@ -210,8 +211,13 @@ async fn update_children(
             .children()
             .of_type(child_config.child_type)
             .get(&child_id);
-        let update_required =
-            is_child_update_required(&parent_id, child_config, existing_child, &child_id.as_id_ref(), &child)?;
+        let update_required = is_child_update_required(
+            &parent_id,
+            child_config,
+            existing_child,
+            &child_id.as_id_ref(),
+            &child,
+        )?;
         add_parent_references(runtime_config, parent_id.name(), parent_uid, &mut child)?;
         if let Some(update_type) = update_required {
             let start_time = Instant::now();
@@ -258,13 +264,17 @@ async fn do_child_update(
                 );
             }
             // the desired child should have already been validated
-            let child_id = desired_child.get_id_ref().expect("failed to get id from desired child resource");
+            let child_id = desired_child
+                .get_id_ref()
+                .expect("failed to get id from desired child resource");
             client
                 .replace_resource(k8s_type, &child_id, &desired_child)
                 .await
         }
         UpdateType::Delete => {
-            let child_id = desired_child.get_id_ref().expect("failed to get id from desired child resource");
+            let child_id = desired_child
+                .get_id_ref()
+                .expect("failed to get id from desired child resource");
             // TODO: Deleting a resource could return a 409 error if it's already being deleted. Figure out how to deal with that
             client.delete_resource(k8s_type, &child_id).await
         }

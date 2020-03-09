@@ -1,13 +1,13 @@
 use crate::error::Error;
 use crate::k8s_types::K8sType;
-use crate::resource::{InvalidResourceError, K8sResource, ObjectId, };
+use crate::resource::{InvalidResourceError, K8sResource, ObjectId};
 
 #[cfg(feature = "testkit")]
 use crate::resource::ObjectIdRef;
 
 use crate::runner::client::{ApiError, Client, Error as ClientError, ObjectList, WatchEvent};
 use crate::runner::metrics::WatcherMetrics;
-use crate::runner::resource_map::{ResourceMap, IdSet};
+use crate::runner::resource_map::{IdSet, ResourceMap};
 
 use serde_json::Value;
 use tokio::executor::Executor;
@@ -18,7 +18,6 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug, Display};
 use std::hash::Hash;
 use std::sync::Arc;
-
 
 #[derive(Debug)]
 pub struct LabelToIdIndex {

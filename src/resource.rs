@@ -1,5 +1,5 @@
-pub(crate) mod object_id;
 mod json_ext;
+pub(crate) mod object_id;
 
 use crate::k8s_types::K8sType;
 
@@ -290,4 +290,3 @@ impl<'a> From<(&'a str, &'a str)> for K8sTypeRef<'a> {
         K8sTypeRef(api_version, kind)
     }
 }
-

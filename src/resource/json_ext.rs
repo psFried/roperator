@@ -1,5 +1,5 @@
-use serde_json::{Value};
 use crate::resource::{K8sTypeRef, ObjectIdRef};
+use serde_json::Value;
 
 pub static API_VERSION_POINTER: &str = "/apiVersion";
 pub static KIND_POINTER: &str = "/kind";
