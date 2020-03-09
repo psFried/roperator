@@ -238,15 +238,6 @@ impl Into<Value> for K8sResource {
     }
 }
 
-pub fn type_ref(json: &Value) -> Option<K8sTypeRef<'_>> {
-    str_value(json, "/apiVersion")
-        .and_then(|api_version| str_value(json, "/kind").map(|kind| K8sTypeRef(api_version, kind)))
-}
-
-pub fn str_value<'a, 'b>(json: &'a Value, pointer: &'b str) -> Option<&'a str> {
-    json.pointer(pointer).and_then(Value::as_str)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct K8sTypeRef<'a>(pub &'a str, pub &'a str);
 impl<'a> K8sTypeRef<'a> {
