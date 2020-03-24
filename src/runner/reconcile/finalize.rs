@@ -36,11 +36,11 @@ pub(crate) async fn handle_finalize(handler: SyncHandler) {
             log::error!("Failed to finalize parent: {}, err: {}", parent_id, err);
             // here again, we should change this to use an incremental backoff instead of these fixed delays
             tokio::timer::delay_for(Duration::from_secs(5)).await;
-            true
+            Some(Duration::from_millis(0))
         }
     };
     let message = ResourceMessage {
-        event_type: EventType::UpdateOperationComplete { retry },
+        event_type: EventType::UpdateOperationComplete { resync: retry },
         resource_type: parent_type,
         resource_id: parent_id,
         index_key: Some(parent_index_key),
@@ -53,9 +53,10 @@ async fn get_finalize_result(
     handler: Arc<dyn Handler>,
     client: Client,
     runtime_config: &RuntimeConfig,
-) -> Result<bool, UpdateError> {
+) -> Result<Option<Duration>, UpdateError> {
     if !does_finalizer_exist(&request.parent, runtime_config) {
-        return Ok(false);
+        // we've already finalized this, so no need to do it again
+        return Ok(None);
     }
 
     let (req, finalize_result) = tokio_executor::blocking::run(move || {
@@ -73,27 +74,27 @@ async fn get_finalize_result(
         (request, result)
     })
     .await;
-    let FinalizeResponse { finalized, status } = finalize_result?;
+    let FinalizeResponse { retry, status } = finalize_result?;
 
     let request: SyncRequest = req;
     let parent_id = request.parent.get_object_id();
 
-    if finalized {
-        log::info!(
-            "handler response indicates that parent: {} has been finalized",
-            parent_id
-        );
-        remove_finalizer(&client, runtime_config, &request.parent).await?;
-    } else {
+    if let Some(delay) = retry {
         log::info!(
             "handler response indicates that parent: {} has not been finalized. Will re-try later",
             parent_id
         );
         update_status_if_different(&request.parent, &client, runtime_config, status).await?;
-        tokio::timer::delay_for(Duration::from_secs(3)).await;
+        tokio::timer::delay_for(delay).await;
+    } else {
+        log::info!(
+            "handler response indicates that parent: {} has been finalized",
+            parent_id
+        );
+        remove_finalizer(&client, runtime_config, &request.parent).await?;
     }
 
-    Ok(!finalized)
+    Ok(retry)
 }
 
 async fn remove_finalizer<'a>(

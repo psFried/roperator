@@ -16,6 +16,7 @@ use crate::error::Error;
 use serde::Serialize;
 use serde_json::Value;
 use std::fmt::{self, Debug};
+use std::time::Duration;
 
 pub use self::request::{RawView, RequestChildren, SyncRequest, TypedIter, TypedView};
 
@@ -34,6 +35,11 @@ pub struct SyncResponse {
     /// the _actual_ state described in the `SyncRequest`, then those child resources will be updated based on the `UpdateStrategy`
     /// that was configured for that child type.
     pub children: Vec<Value>,
+
+    /// If specified, then this parent will go through the sync process again after the given
+    /// period. The parent may still be synced sooner if a change is observed in either the parent
+    /// or any children.
+    pub resync: Option<Duration>,
 }
 
 impl Debug for SyncResponse {
@@ -54,6 +60,7 @@ impl SyncResponse {
         SyncResponse {
             status,
             children: Vec::new(),
+            resync: None,
         }
     }
 
@@ -68,6 +75,10 @@ impl SyncResponse {
             self.children.push(c);
         })
     }
+
+    pub fn resync_after(&mut self, duration: Duration) {
+        self.resync = Some(duration);
+    }
 }
 
 /// The response returned from a finalize function. Finalize functions may not return any children, but they may
@@ -78,10 +89,12 @@ pub struct FinalizeResponse {
     /// The desired status of the parent. This will be ignored if `finalized` is `true`, but if `finalized` is false,
     /// then the parent status will be updated to this value.
     pub status: Value,
-    /// Whether or not it's OK to proceed with deletion of the parent resource. If this is `true`, then roperator will
-    /// remove itself from the list of finalizers for the parent, which will allow deletion to proceed. If this is `false`,
-    /// then roperator will update the parent status and re-try your finalize function later.
-    pub finalized: bool,
+
+    /// Whether or not it's OK to proceed with deletion of the parent resource. If this is `None`, then roperator will
+    /// remove itself from the list of finalizers for the parent, which will allow deletion to proceed. If this is `Some`,
+    /// then roperator will update the parent status and re-try your finalize function later, after
+    /// the given duration.
+    pub retry: Option<Duration>,
 }
 
 impl Debug for FinalizeResponse {
@@ -125,7 +138,7 @@ pub trait Handler: Send + Sync + 'static {
     fn finalize(&self, request: &SyncRequest) -> Result<FinalizeResponse, Error> {
         Ok(FinalizeResponse {
             status: request.parent.status().cloned().unwrap_or(Value::Null),
-            finalized: true,
+            retry: None,
         })
     }
 }

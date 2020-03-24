@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use tokio::timer::delay_for;
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, Duration};
 
 pub(crate) async fn handle_sync(handler: SyncHandler) {
     let SyncHandler {
@@ -31,18 +31,10 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
     let start_time = Instant::now();
     let result = private_handle_sync(start_time, request, handler, client, &*runtime_config).await;
 
-    let retry = match result {
-        Ok(true) => {
-            log::info!(
-                "Observed new parent: {} and added '{}' as a finalizer",
-                parent_id,
-                runtime_config.operator_name
-            );
-            true
-        }
-        Ok(false) => {
+    let resync = match result {
+        Ok(duration) => {
             log::info!("Finished sync for parent: {}", parent_id);
-            false
+            duration
         }
         Err(err) => {
             runtime_config.metrics.parent_sync_error(&parent_id_ref);
@@ -50,11 +42,11 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
             // we'll delay for a while before sending the message that we've finished so that we can
             // prevent the main loop from re-trying too soon. Eventually we should implement a backoff
             delay_for(std::time::Duration::from_secs(10)).await;
-            true
+            Some(Duration::from_secs(0))
         }
     };
     let message = ResourceMessage {
-        event_type: EventType::UpdateOperationComplete { retry },
+        event_type: EventType::UpdateOperationComplete { resync },
         resource_id: parent_id,
         resource_type: runtime_config.parent_type,
         index_key: Some(parent_index_key),
@@ -72,10 +64,18 @@ async fn private_handle_sync(
     handler: Arc<dyn Handler>,
     client: Client,
     runtime_config: &RuntimeConfig,
-) -> Result<bool, UpdateError> {
+) -> Result<Option<Duration>, UpdateError> {
     if !does_finalizer_exist(&request.parent, runtime_config) {
+        // We'll only add the finalizer this time, and then immediately re-sync
+        // This is because adding the finalizer will change the resourceVersion, so
+        // we need to observe the new one before attempting to sync
         add_finalizer_to_parent(&request.parent, &client, runtime_config).await?;
-        Ok(true)
+        log::info!(
+            "Observed new parent: {} and added '{}' as a finalizer",
+            request.parent.get_object_id(),
+            runtime_config.operator_name
+        );
+        Ok(Some(Duration::from_secs(0)))
     } else {
         let (request, sync_result) = {
             tokio_executor::blocking::run(move || {
@@ -90,8 +90,9 @@ async fn private_handle_sync(
             .await
         };
         let response = sync_result.map_err(|e| UpdateError::HandlerError(e))?;
+        let resync = response.resync.clone();
         update_all(request, response, client, runtime_config).await?;
-        Ok(false)
+        Ok(resync)
     }
 }
 
@@ -102,7 +103,7 @@ async fn update_all(
     runtime_config: &RuntimeConfig,
 ) -> Result<(), UpdateError> {
     let start_time = Instant::now();
-    let SyncResponse { status, children } = handler_response;
+    let SyncResponse { status, children, .. } = handler_response;
     let parent_id = request.parent.get_object_id().to_owned();
     update_status_if_different(&request.parent, &client, runtime_config, status).await?;
     log::debug!(

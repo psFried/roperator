@@ -6,6 +6,8 @@ use roperator::serde_json::{json, Value};
 
 use std::fmt::{self, Display};
 use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 fn make_client_config(operator_name: &str) -> ClientConfig {
     if let Ok(conf) = ClientConfig::from_service_account(operator_name) {
@@ -181,7 +183,7 @@ fn operator_continuously_retries_sync_of_parent_when_handler_returns_error() {
 }
 
 #[test]
-fn operator_retries_finalize_when_response_finalized_is_false() {
+fn operator_retries_finalize_when_response_retry_is_some() {
     use std::sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -200,9 +202,14 @@ fn operator_retries_finalize_when_response_finalized_is_false() {
             let status = json!({
                 "finalizeCalls": num_calls,
             });
+            let retry = if num_calls >= REQUIRED_FINALIZE_CALLS {
+                None
+            } else {
+                Some(Duration::from_millis(5))
+            };
             Ok(FinalizeResponse {
                 status,
-                finalized: num_calls >= REQUIRED_FINALIZE_CALLS,
+                retry,
             })
         }
     }
@@ -350,6 +357,54 @@ fn child_is_not_updated_until_deleted_when_update_strategy_is_on_delete() {
     assert_ne!(old_child.uid(), new_child.uid()); // assert that they're different instances
 }
 
+#[test]
+fn handler_is_invoked_after_waiting_when_resync_is_some() {
+    let namespace = unique_namespace("resync");
+
+    // 2 syncs would be normal if nothing changed, since we re-sync so that the handler
+    // can observe the updated status. But for this test we want to ensure that we'll
+    // re-sync anyway if the resync field is Some
+    const EXPECTED_SYNCS: u64 = 5;
+
+    let counter = Arc::new(AtomicU64::new(0));
+    struct ResyncHandler(Arc<AtomicU64>);
+    impl Handler for ResyncHandler {
+        fn sync(&self, _request: &SyncRequest) -> Result<SyncResponse, Error> {
+            let i = self.0.fetch_add(1, Ordering::SeqCst);
+            let resync = if i > EXPECTED_SYNCS {
+                None
+            } else {
+                Some(Duration::from_millis(5))
+            };
+            Ok(SyncResponse {
+                status: json!({
+                    "foo": "bar"
+                }),
+                children: Vec::new(),
+                resync,
+            })
+        }
+    }
+    let handler = ResyncHandler(counter.clone());
+    let mut testkit = setup(namespace.as_str(), handler);
+
+    let parent_name = "test-parent";
+    let parent = parent(&namespace, parent_name);
+    testkit
+        .create_resource(PARENT_TYPE, &parent)
+        .expect("failed to create parent resource");
+
+    let start = std::time::Instant::now();
+    while counter.load(Ordering::SeqCst) < EXPECTED_SYNCS &&
+            start.elapsed() < Duration::from_secs(5)
+    {
+        testkit.reconcile(Duration::from_secs(1)).expect("failed to reconcile");
+    }
+
+    let actual_syncs = counter.load(Ordering::SeqCst);
+    assert!(actual_syncs >= EXPECTED_SYNCS);
+}
+
 #[derive(Debug, PartialEq, Clone)]
 struct MockHandlerError(u64);
 impl Display for MockHandlerError {
@@ -441,5 +496,6 @@ fn create_child_handler(req: &SyncRequest) -> Result<SyncResponse, Error> {
             "childCount": count,
         }),
         children: vec![child],
+        resync: None,
     })
 }
