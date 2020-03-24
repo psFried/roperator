@@ -164,7 +164,7 @@ impl RuntimeConfig {
 }
 
 async fn run_with_client(
-    mut executor: TaskExecutor,
+    executor: TaskExecutor,
     metrics: Metrics,
     running: Arc<AtomicBool>,
     config: OperatorConfig,
@@ -175,7 +175,7 @@ async fn run_with_client(
     let server_port = config.server_port;
     let expose_metrics = config.expose_metrics;
     let expose_health = config.expose_health;
-    let mut state = create_operator_state(&mut executor, metrics, running, config, client).await;
+    let mut state = create_operator_state(executor.clone(), metrics, running, config, client).await;
     if expose_metrics || expose_health {
         let server_future = server::start(
             executor,
@@ -191,13 +191,13 @@ async fn run_with_client(
     }
 }
 
-async fn create_operator_state(
-    executor: &mut impl Executor,
+async fn create_operator_state<T: Executor>(
+    mut executor: T,
     metrics: Metrics,
     running: Arc<AtomicBool>,
     config: OperatorConfig,
     client: Client,
-) -> OperatorState {
+) -> OperatorState<T> {
     let OperatorConfig {
         parent,
         child_types,
@@ -212,7 +212,7 @@ async fn create_operator_state(
 
     let parent_metrics = metrics.watcher_metrics(parent);
     let parent_monitor = informer::start_parent_monitor(
-        executor,
+        &mut executor,
         namespace.clone(),
         parent,
         client.clone(),
@@ -231,7 +231,7 @@ async fn create_operator_state(
         };
         child_runtime_config.insert(child_type, runtime_conf);
         let child_monitor = informer::start_child_monitor(
-            executor,
+            &mut executor,
             tracking_label_name.clone(),
             namespace.clone(),
             child_type,
@@ -256,9 +256,10 @@ async fn create_operator_state(
         children,
         sender: tx,
         receiver: rx,
-        in_progress_updates: HashMap::new(),
+        parent_states: HashMap::new(),
         client,
         runtime_config,
+        executor,
     }
 }
 
@@ -270,28 +271,44 @@ struct InProgressUpdate {
     start_time: Instant,
 }
 
-impl InProgressUpdate {
-    fn new(parent_id: ObjectId) -> InProgressUpdate {
-        InProgressUpdate {
-            parent_id,
+#[derive(Debug, Default)]
+struct ParentState {
+    in_progress: Option<InProgressUpdate>,
+    sync_counter: u32,
+}
+
+impl ParentState {
+    fn start_sync(&mut self, id: ObjectId) {
+        self.sync_counter += 1;
+        self.in_progress = Some(InProgressUpdate {
+            parent_id: id,
             start_time: Instant::now(),
-        }
+        })
+    }
+
+    fn sync_finished(&mut self) -> Option<InProgressUpdate> {
+        self.in_progress.take()
+    }
+
+    fn is_update_in_progress(&self) -> bool {
+        self.in_progress.is_some()
     }
 }
 
 #[derive(Debug)]
-struct OperatorState {
+struct OperatorState<T: Executor> {
     running: Arc<AtomicBool>,
     parents: ResourceMonitor<UidToIdIndex>,
     children: HashMap<&'static K8sType, ResourceMonitor<LabelToIdIndex>>,
     sender: Sender<ResourceMessage>,
     receiver: Receiver<ResourceMessage>,
-    in_progress_updates: HashMap<String, InProgressUpdate>,
+    parent_states: HashMap<String, ParentState>,
     client: Client,
     runtime_config: Arc<RuntimeConfig>,
+    executor: T,
 }
 
-impl OperatorState {
+impl<T: Executor> OperatorState<T> {
     async fn run(&mut self, handler: HandlerRef) {
         let mut parent_ids_to_sync = HashSet::with_capacity(16);
         while self.running.load(Ordering::Relaxed) {
@@ -352,11 +369,11 @@ impl OperatorState {
 
     #[cfg(feature = "testkit")]
     fn is_any_update_in_progress(&self) -> bool {
-        !self.in_progress_updates.is_empty()
+        self.parent_states.values().any(ParentState::is_update_in_progress)
     }
 
     fn is_update_in_progress(&self, parent_uid: &str) -> bool {
-        self.in_progress_updates.contains_key(parent_uid)
+        self.parent_states.get(parent_uid).map(ParentState::is_update_in_progress).unwrap_or(false)
     }
 
     async fn sync_parent(&mut self, parent_uid: &str, handler: HandlerRef) -> Result<(), Error> {
@@ -376,8 +393,8 @@ impl OperatorState {
         );
 
         let request = self.create_sync_request(parent).await?;
-        self.in_progress_updates
-            .insert(parent_uid.to_owned(), InProgressUpdate::new(parent_id));
+        let parent_state = self.parent_states.entry(parent_uid.to_owned()).or_default();
+        parent_state.start_sync(parent_id);
 
         let handler = SyncHandler {
             sender: self.sender.clone(),
@@ -487,23 +504,33 @@ impl OperatorState {
         } = message;
         let uid = index_key.unwrap();
         match event_type {
-            EventType::UpdateOperationComplete { retry } => {
-                if let Some(prev) = self.in_progress_updates.remove(&uid) {
+            EventType::UpdateOperationComplete { resync } => {
+                let in_progress = self.parent_states.get_mut(&uid).and_then(ParentState::sync_finished);
+
+                // sanity check to ensure that there was actually an update in progress
+                // if not, then we'll log the error and ignore this message, since this indicates
+                // that there's a bug in roperator
+                if let Some(prev) = in_progress {
                     let duration_millis = duration_to_millis(prev.start_time.elapsed());
                     log::info!(
                         "Completed sync of parent: {} with uid: {} in {}ms, needs retry: {}",
-                        prev.parent_id,
+                        resource_id,
                         uid,
                         duration_millis,
-                        retry
+                        resync.is_some()
                     );
+                    if let Some(duration) = resync {
+                        if duration_to_millis(duration) == 0 {
+                            // if the desire is to re-sync immediately, then we'll just trigger it
+                            // now and bypass the scheduling
+                            to_sync.insert(uid);
+                            log::info!("Triggering immediate re-sync on parent: {}", resource_id);
+                        } else {
+                            self.schedule_resync(&uid, resource_id, duration);
+                        }
+                    }
                 } else {
                     log::error!("Got updateOperationComplete when there was no in-progress operation for uid: {}", uid);
-                }
-
-                if retry {
-                    to_sync.insert(uid);
-                    log::info!("Triggering re-try of sync on parent: {}", resource_id);
                 }
             }
             EventType::Deleted if resource_type == self.runtime_config.parent_type => {
@@ -511,6 +538,19 @@ impl OperatorState {
                 self.runtime_config
                     .metrics
                     .parent_deleted(&resource_id.as_id_ref());
+                let _ = self.parent_states.remove(&uid);
+            }
+            EventType::TriggerResync { resync_round } => {
+                let current = self.parent_states.get(&uid).map(|ps| ps.sync_counter).unwrap_or(0);
+                if resync_round == current {
+                    if to_sync.insert(uid) {
+                        log::debug!("triggering scheduled resync for parent: {}", resource_id);
+                    } else {
+                        log::debug!("skipping scheduled resync for parent: {} because it was already triggered by something else", resource_id);
+                    }
+                } else {
+                    log::debug!("Skipping scheduled resync for parent: {} because a sync was already completed since this was scheduled", resource_id);
+                }
             }
             _ => {
                 if to_sync.insert(uid) {
@@ -524,6 +564,30 @@ impl OperatorState {
             }
         }
     }
+
+    fn schedule_resync(&mut self, uid: &str, parent_id: ObjectId, duration: Duration) {
+        let mut sender = self.sender.clone();
+        let sync_count = self.parent_states.get(uid).map(|ps| ps.sync_counter).unwrap_or(0);
+        log::trace!("scheduling resync for parent: {} with sync_counter: {} for {}ms in the future", parent_id, sync_count, duration_to_millis(duration));
+        let resource_type = self.runtime_config.parent_type;
+        let index_key = Some(uid.to_owned());
+
+        self.executor.spawn(Box::pin(async move {
+            tokio::timer::delay_for(duration).await;
+            log::trace!("sending resync message for parent: {} with sync_counter: {}", parent_id, sync_count);
+            let message = ResourceMessage {
+                event_type: EventType::TriggerResync { resync_round: sync_count },
+                resource_type,
+                resource_id: parent_id,
+                index_key,
+            };
+            if sender.send(message).await.is_err() {
+                log::warn!("Unable to send resync message");
+            }
+        }))
+        .expect("fatal error: failed to spawn a task to schedule a resync");
+    }
+
 
     async fn recv_next(&mut self, timeout: Duration) -> Option<ResourceMessage> {
         match self.receiver.recv().timeout(timeout).await {

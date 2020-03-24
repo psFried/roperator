@@ -52,7 +52,7 @@ macro_rules! test_error {
 /// the operator when you call functions like `assert_resource_eq_eventually` and others. These functions accept timeout values and
 /// will automatically run the reconciliation loop of the operator intermittently as they wait for the desired condition.
 pub struct TestKit {
-    state: OperatorState,
+    state: OperatorState<TaskExecutor>,
     handler: HandlerRef,
     instrumented_handler: InstrumentedHandler,
     runtime: Runtime,
@@ -174,9 +174,9 @@ impl TestKit {
         let namespace = operator_config.namespace.clone();
 
         let state = runtime.block_on(async {
-            let mut executor = TaskExecutor::current();
+            let executor = TaskExecutor::current();
             create_operator_state(
-                &mut executor,
+                executor,
                 metrics,
                 Arc::new(AtomicBool::new(true)),
                 operator_config,
@@ -687,7 +687,7 @@ impl Handler for InstrumentedHandler {
 
 // TODO: add some sort of "required_quiet_period" parameter so that we can detect hot-loop scenarios
 async fn do_reconciliation_run(
-    state: &mut OperatorState,
+    state: &mut OperatorState<TaskExecutor>,
     parents_needing_sync: &mut HashSet<String>,
     handler: &HandlerRef,
     instrumented_handler: &InstrumentedHandler,
@@ -828,7 +828,7 @@ impl Display for MissingResource {
 impl std::error::Error for MissingResource {}
 
 async fn compare_resources(
-    state: &OperatorState,
+    state: &OperatorState<TaskExecutor>,
     k8s_type: &K8sType,
     id: &ObjectIdRef<'_>,
     expected: &Value,
@@ -838,7 +838,7 @@ async fn compare_resources(
 }
 
 async fn get_object(
-    state: &OperatorState,
+    state: &OperatorState<TaskExecutor>,
     k8s_type: &K8sType,
     id: &ObjectIdRef<'_>,
 ) -> Result<K8sResource, Error> {

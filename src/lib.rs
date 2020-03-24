@@ -56,6 +56,7 @@
 //!     Ok(SyncResponse {
 //!         status,
 //!         children: vec![pod],
+//!         resync: None,
 //!     })
 //! }
 //! ```

@@ -16,8 +16,8 @@ use tokio::sync::{Mutex, MutexGuard};
 
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Display};
-use std::hash::Hash;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub struct LabelToIdIndex {
@@ -193,35 +193,23 @@ impl CacheAndIndex<LabelToIdIndex> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug)]
 pub enum EventType {
     Created,
     Updated,
     Finalizing,
     Deleted,
-    UpdateOperationComplete { retry: bool },
+    UpdateOperationComplete { resync: Option<Duration> },
+    TriggerResync { resync_round: u32 },
+
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug)]
 pub struct ResourceMessage {
     pub event_type: EventType,
     pub resource_type: &'static K8sType,
     pub resource_id: ObjectId,
     pub index_key: Option<String>,
-}
-
-impl Debug for ResourceMessage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}({:?}, {}, {}, {:?})",
-            std::any::type_name::<ResourceMessage>(),
-            self.event_type,
-            self.resource_type,
-            self.resource_id,
-            self.index_key
-        )
-    }
 }
 
 pub struct ResourceState<'a, I: ReverseIndex>(MutexGuard<'a, CacheAndIndex<I>>);
