@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use tokio::timer::delay_for;
 
 use std::sync::Arc;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 pub(crate) async fn handle_sync(handler: SyncHandler) {
     let SyncHandler {
@@ -103,7 +103,9 @@ async fn update_all(
     runtime_config: &RuntimeConfig,
 ) -> Result<(), UpdateError> {
     let start_time = Instant::now();
-    let SyncResponse { status, children, .. } = handler_response;
+    let SyncResponse {
+        status, children, ..
+    } = handler_response;
     let parent_id = request.parent.get_object_id().to_owned();
     update_status_if_different(&request.parent, &client, runtime_config, status).await?;
     log::debug!(

@@ -201,7 +201,6 @@ pub enum EventType {
     Deleted,
     UpdateOperationComplete { resync: Option<Duration> },
     TriggerResync { resync_round: u32 },
-
 }
 
 #[derive(Debug)]
