@@ -369,11 +369,16 @@ impl<T: Executor> OperatorState<T> {
 
     #[cfg(feature = "testkit")]
     fn is_any_update_in_progress(&self) -> bool {
-        self.parent_states.values().any(ParentState::is_update_in_progress)
+        self.parent_states
+            .values()
+            .any(ParentState::is_update_in_progress)
     }
 
     fn is_update_in_progress(&self, parent_uid: &str) -> bool {
-        self.parent_states.get(parent_uid).map(ParentState::is_update_in_progress).unwrap_or(false)
+        self.parent_states
+            .get(parent_uid)
+            .map(ParentState::is_update_in_progress)
+            .unwrap_or(false)
     }
 
     async fn sync_parent(&mut self, parent_uid: &str, handler: HandlerRef) -> Result<(), Error> {
@@ -505,7 +510,10 @@ impl<T: Executor> OperatorState<T> {
         let uid = index_key.unwrap();
         match event_type {
             EventType::UpdateOperationComplete { resync } => {
-                let in_progress = self.parent_states.get_mut(&uid).and_then(ParentState::sync_finished);
+                let in_progress = self
+                    .parent_states
+                    .get_mut(&uid)
+                    .and_then(ParentState::sync_finished);
 
                 // sanity check to ensure that there was actually an update in progress
                 // if not, then we'll log the error and ignore this message, since this indicates
@@ -541,7 +549,11 @@ impl<T: Executor> OperatorState<T> {
                 let _ = self.parent_states.remove(&uid);
             }
             EventType::TriggerResync { resync_round } => {
-                let current = self.parent_states.get(&uid).map(|ps| ps.sync_counter).unwrap_or(0);
+                let current = self
+                    .parent_states
+                    .get(&uid)
+                    .map(|ps| ps.sync_counter)
+                    .unwrap_or(0);
                 if resync_round == current {
                     if to_sync.insert(uid) {
                         log::debug!("triggering scheduled resync for parent: {}", resource_id);
@@ -567,27 +579,42 @@ impl<T: Executor> OperatorState<T> {
 
     fn schedule_resync(&mut self, uid: &str, parent_id: ObjectId, duration: Duration) {
         let mut sender = self.sender.clone();
-        let sync_count = self.parent_states.get(uid).map(|ps| ps.sync_counter).unwrap_or(0);
-        log::trace!("scheduling resync for parent: {} with sync_counter: {} for {}ms in the future", parent_id, sync_count, duration_to_millis(duration));
+        let sync_count = self
+            .parent_states
+            .get(uid)
+            .map(|ps| ps.sync_counter)
+            .unwrap_or(0);
+        log::trace!(
+            "scheduling resync for parent: {} with sync_counter: {} for {}ms in the future",
+            parent_id,
+            sync_count,
+            duration_to_millis(duration)
+        );
         let resource_type = self.runtime_config.parent_type;
         let index_key = Some(uid.to_owned());
 
-        self.executor.spawn(Box::pin(async move {
-            tokio::timer::delay_for(duration).await;
-            log::trace!("sending resync message for parent: {} with sync_counter: {}", parent_id, sync_count);
-            let message = ResourceMessage {
-                event_type: EventType::TriggerResync { resync_round: sync_count },
-                resource_type,
-                resource_id: parent_id,
-                index_key,
-            };
-            if sender.send(message).await.is_err() {
-                log::warn!("Unable to send resync message");
-            }
-        }))
-        .expect("fatal error: failed to spawn a task to schedule a resync");
+        self.executor
+            .spawn(Box::pin(async move {
+                tokio::timer::delay_for(duration).await;
+                log::trace!(
+                    "sending resync message for parent: {} with sync_counter: {}",
+                    parent_id,
+                    sync_count
+                );
+                let message = ResourceMessage {
+                    event_type: EventType::TriggerResync {
+                        resync_round: sync_count,
+                    },
+                    resource_type,
+                    resource_id: parent_id,
+                    index_key,
+                };
+                if sender.send(message).await.is_err() {
+                    log::warn!("Unable to send resync message");
+                }
+            }))
+            .expect("fatal error: failed to spawn a task to schedule a resync");
     }
-
 
     async fn recv_next(&mut self, timeout: Duration) -> Option<ResourceMessage> {
         match self.receiver.recv().timeout(timeout).await {

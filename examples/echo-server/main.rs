@@ -101,7 +101,11 @@ fn handle_sync(request: &SyncRequest) -> Result<SyncResponse, Error> {
         "message": get_current_status_message(request),
     });
     let children = get_desired_children(request)?;
-    Ok(SyncResponse { status, children, resync: None })
+    Ok(SyncResponse {
+        status,
+        children,
+        resync: None,
+    })
 }
 
 /// Returns the json value that should be set on the parent EchoServer

@@ -5,9 +5,9 @@ use roperator::runner::testkit::{HandlerErrors, TestKit};
 use roperator::serde_json::{json, Value};
 
 use std::fmt::{self, Display};
-use std::time::Duration;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 fn make_client_config(operator_name: &str) -> ClientConfig {
     if let Ok(conf) = ClientConfig::from_service_account(operator_name) {
@@ -207,10 +207,7 @@ fn operator_retries_finalize_when_response_retry_is_some() {
             } else {
                 Some(Duration::from_millis(5))
             };
-            Ok(FinalizeResponse {
-                status,
-                retry,
-            })
+            Ok(FinalizeResponse { status, retry })
         }
     }
 
@@ -395,10 +392,12 @@ fn handler_is_invoked_after_waiting_when_resync_is_some() {
         .expect("failed to create parent resource");
 
     let start = std::time::Instant::now();
-    while counter.load(Ordering::SeqCst) < EXPECTED_SYNCS &&
-            start.elapsed() < Duration::from_secs(5)
+    while counter.load(Ordering::SeqCst) < EXPECTED_SYNCS
+        && start.elapsed() < Duration::from_secs(5)
     {
-        testkit.reconcile(Duration::from_secs(1)).expect("failed to reconcile");
+        testkit
+            .reconcile(Duration::from_secs(1))
+            .expect("failed to reconcile");
     }
 
     let actual_syncs = counter.load(Ordering::SeqCst);
