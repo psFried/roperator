@@ -113,6 +113,7 @@ fn handle_sync(request: &SyncRequest) -> Result<SyncResponse, Error> {
 /// This function gets called by the operator whenever the sync handler responds with an error.
 /// It needs to respond with the appropriate status for the given request and error and the minimum length of
 /// time to wait before calling `handle_sync` again.
+//// This example will never actually get called.
 fn handle_error(request: &SyncRequest, err: Error) -> (Value, Option<Duration>) {
     log::error!("Failed to process request: {:?}\nCause: {:?}", request, err);
 
