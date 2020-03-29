@@ -11,7 +11,6 @@ use crate::runner::resource_map::IdSet;
 use crate::runner::{duration_to_millis, ChildRuntimeConfig, RuntimeConfig};
 
 use serde_json::{json, Value};
-use tokio::timer::delay_for;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -39,10 +38,8 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
         Err(err) => {
             runtime_config.metrics.parent_sync_error(&parent_id_ref);
             log::error!("Error while syncing parent: {}: {:?}", parent_id, err);
-            // we'll delay for a while before sending the message that we've finished so that we can
-            // prevent the main loop from re-trying too soon. Eventually we should implement a backoff
-            delay_for(std::time::Duration::from_secs(10)).await;
-            Some(Duration::from_secs(0))
+
+            Some(Duration::from_secs(10))
         }
     };
     let message = ResourceMessage {
@@ -77,7 +74,7 @@ async fn private_handle_sync(
         );
         Ok(Some(Duration::from_secs(0)))
     } else {
-        let (request, sync_result) = {
+        let (request, response) = {
             tokio_executor::blocking::run(move || {
                 let result = handler.sync(&request);
                 log::debug!(
@@ -89,7 +86,6 @@ async fn private_handle_sync(
             })
             .await
         };
-        let response = sync_result.map_err(|e| UpdateError::HandlerError(e))?;
         let resync = response.resync;
         update_all(request, response, client, runtime_config).await?;
         Ok(resync)
