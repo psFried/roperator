@@ -193,7 +193,7 @@ fn operator_retries_finalize_when_response_retry_is_some() {
     // Handler that will increment the counter for each finalize call, and return `finalized: true` once it reaches 3
     struct FinalizeHandler(Arc<AtomicU64>);
     impl Handler for FinalizeHandler {
-        fn sync(&self, request: &SyncRequest) -> Result<SyncResponse, Error> {
+        fn sync(&self, request: &SyncRequest) -> SyncResponse {
             create_child_handler(request)
         }
 
@@ -366,20 +366,20 @@ fn handler_is_invoked_after_waiting_when_resync_is_some() {
     let counter = Arc::new(AtomicU64::new(0));
     struct ResyncHandler(Arc<AtomicU64>);
     impl Handler for ResyncHandler {
-        fn sync(&self, _request: &SyncRequest) -> Result<SyncResponse, Error> {
+        fn sync(&self, _request: &SyncRequest) -> SyncResponse {
             let i = self.0.fetch_add(1, Ordering::SeqCst);
             let resync = if i > EXPECTED_SYNCS {
                 None
             } else {
                 Some(Duration::from_millis(5))
             };
-            Ok(SyncResponse {
+            SyncResponse {
                 status: json!({
                     "foo": "bar"
                 }),
                 children: Vec::new(),
                 resync,
-            })
+            }
         }
     }
     let handler = ResyncHandler(counter.clone());
@@ -437,15 +437,8 @@ impl<T: Handler> ReturnErrorHandler<T> {
 }
 
 impl<T: Handler> Handler for ReturnErrorHandler<T> {
-    fn sync(&self, req: &SyncRequest) -> Result<SyncResponse, Error> {
-        if self.should_return_error(req) {
-            let index = self
-                .counter
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Err(Box::new(MockHandlerError(index)))
-        } else {
-            self.delegate.sync(req)
-        }
+    fn sync(&self, req: &SyncRequest) -> SyncResponse {
+        self.delegate.sync(req)
     }
 
     fn finalize(&self, req: &SyncRequest) -> Result<FinalizeResponse, Error> {
@@ -460,7 +453,7 @@ impl<T: Handler> Handler for ReturnErrorHandler<T> {
     }
 }
 
-fn create_child_handler(req: &SyncRequest) -> Result<SyncResponse, Error> {
+fn create_child_handler(req: &SyncRequest) -> SyncResponse {
     let namespace = req.parent.namespace();
     let name = req.parent.name();
 
@@ -489,12 +482,12 @@ fn create_child_handler(req: &SyncRequest) -> Result<SyncResponse, Error> {
         format!("Has {} children", count)
     };
 
-    Ok(SyncResponse {
+    SyncResponse {
         status: json!({
             "message": message,
             "childCount": count,
         }),
         children: vec![child],
         resync: None,
-    })
+    }
 }
