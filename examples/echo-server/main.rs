@@ -7,6 +7,7 @@ use roperator::prelude::{
     k8s_types, ChildConfig, Error, K8sType, OperatorConfig, SyncRequest, SyncResponse,
 };
 use roperator::serde_json::{json, Value};
+use std::time::Duration;
 
 /// Name of our operator, which is automatically added as a label value in all of the child resources we create
 const OPERATOR_NAME: &str = "echoserver-example";
@@ -81,11 +82,11 @@ fn main() {
     let client_config =
         client_config_result.expect("failed to resolve cluster data from kubeconfig");
 
-    // now we run the operator, passing in our handler function
+    // now we run the operator, passing in our handler functions
     let err = roperator::runner::run_operator_with_client_config(
         operator_config,
         client_config,
-        handle_sync,
+        (handle_sync, handle_error),
     );
 
     // `run_operator_with_client_config` will never return under normal circumstances, so we only need to handle the sad path here
@@ -99,6 +100,7 @@ fn handle_sync(request: &SyncRequest) -> Result<SyncResponse, Error> {
     log::info!("Got sync request: {:?}", request);
     let status = json!({
         "message": get_current_status_message(request),
+        "phase": "Running",
     });
     let children = get_desired_children(request)?;
     Ok(SyncResponse {
@@ -106,6 +108,20 @@ fn handle_sync(request: &SyncRequest) -> Result<SyncResponse, Error> {
         children,
         resync: None,
     })
+}
+
+/// This function gets called by the operator whenever the sync handler responds with an error.
+/// It needs to respond with the appropriate status for the given request and error and the minimum length of
+/// time to wait before calling `handle_sync` again.
+fn handle_error(request: &SyncRequest, err: Error) -> (Value, Option<Duration>) {
+    log::error!("Failed to process request: {:?}\nCause: {:?}", request, err);
+
+    let status = json!({
+        "message": err.to_string(),
+        "phase": "Error",
+    });
+
+    (status, None)
 }
 
 /// Returns the json value that should be set on the parent EchoServer

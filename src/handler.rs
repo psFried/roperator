@@ -36,9 +36,10 @@ pub struct SyncResponse {
     /// that was configured for that child type.
     pub children: Vec<Value>,
 
-    /// If specified, then this parent will go through the sync process again after the given
+    /// If specified, then this parent will go through the sync process again some time after the given
     /// period. The parent may still be synced sooner if a change is observed in either the parent
-    /// or any children.
+    /// or any children. This period can vary up to the resync_period via exponential backoff when set
+    /// and repeated requests to resync are given.
     pub resync: Option<Duration>,
 }
 
@@ -117,13 +118,11 @@ pub trait Handler: Send + Sync + 'static {
     /// returns a `SyncResponse` that contains the desired child resources and the status to be set on the parent.
     /// Roperator will ensure that the parent status and any child resources all match the values provided by this response.
     ///
-    /// If this function returns an `Error`, then neither the status or any child resources will be updated!
-    ///
     /// This function is allowed to have side effects, such as calling out to external systems and such, but it's important
     /// that any such operations are idempotent. An example would be an operator that calls out to a service to create a database
     /// schema for each parent custom resource instance. It is a good idea to generate deterministic identifiers for such things
     /// based on some immutable metadata from the parent resource (name, namespace, uid).
-    fn sync(&self, request: &SyncRequest) -> Result<SyncResponse, Error>;
+    fn sync(&self, request: &SyncRequest) -> SyncResponse;
 
     /// Finalize is invoked whenever the parent resource starts being deleted. Roperator makes every reasonable attempt to
     /// ensure that this function gets invoked _at least once_ for each parent as it's being deleted. We cannot make any
@@ -145,9 +144,27 @@ pub trait Handler: Send + Sync + 'static {
 
 impl<F> Handler for F
 where
-    F: Fn(&SyncRequest) -> Result<SyncResponse, Error> + Send + Sync + 'static,
+    F: Fn(&SyncRequest) -> SyncResponse + Send + Sync + 'static,
 {
-    fn sync(&self, req: &SyncRequest) -> Result<SyncResponse, Error> {
+    fn sync(&self, req: &SyncRequest) -> SyncResponse {
         self(req)
+    }
+}
+
+impl<SyncFn, ErrorFn> Handler for (SyncFn, ErrorFn)
+where
+    SyncFn: Fn(&SyncRequest) -> Result<SyncResponse, Error> + Send + Sync + 'static,
+    ErrorFn: Fn(&SyncRequest, Error) -> (Value, Option<Duration>) + Send + Sync + 'static,
+{
+
+    fn sync(&self, req: &SyncRequest) -> SyncResponse {
+        let (sync_fun, handle_error) = self;
+        match sync_fun(req) {
+            Ok(resp) => resp,
+            Err(err) => {
+                let (status, resync) = handle_error(req, err);
+                SyncResponse { status, resync, children: Vec::new() }
+            }
+        }
     }
 }
