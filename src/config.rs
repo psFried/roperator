@@ -7,7 +7,7 @@ use crate::k8s_types::K8sType;
 
 use std::collections::HashMap;
 use std::io;
-use std::path::Path;
+use std::{time::Duration, path::Path};
 
 /// Default label that's added to all child resources, so that roperator can track the ownership of resources.
 /// The value is the `metadata.uid` of the parent.
@@ -107,6 +107,10 @@ pub struct OperatorConfig {
     //// If true, then a health check will be exposed by HTTP at `/health`. This is enabled by default
     /// when you use `OperatorConfig::new()`
     pub expose_health: bool,
+
+    //// This is used to space out the time between `Handler::sync()` calls on the same parent resource in a uniform way. If `None`, no exponential backoff is performed.
+    /// maximum period between requested resyncs
+    pub resync_period: Option<Duration>,
 }
 
 impl OperatorConfig {
@@ -122,6 +126,7 @@ impl OperatorConfig {
             server_port: 8080,
             expose_metrics: true,
             expose_health: true,
+            resync_period: Some(Duration::from_secs(60)),
         }
     }
 
@@ -154,6 +159,11 @@ impl OperatorConfig {
     /// Sets the port to listen on for HTTP. This will be ignored if both `expose_metrics` and `expose_health` are `false`
     pub fn server_port(mut self, port: u16) -> Self {
         self.server_port = port;
+        self
+    }
+
+    pub fn resync_period(mut self, period: Option<Duration>) -> Self {
+        self.resync_period = period;
         self
     }
 }

@@ -22,6 +22,7 @@ use crate::runner::informer::{
 use crate::runner::reconcile::SyncHandler;
 use client::Client;
 use metrics::Metrics;
+use backoff::{ExponentialBackoff, backoff::Backoff};
 
 use tokio::executor::Executor;
 use tokio::prelude::*;
@@ -144,6 +145,7 @@ pub(crate) struct RuntimeConfig {
     pub correlation_label_name: String,
     pub controller_label_name: String,
     pub operator_name: String,
+    pub resync_period: Option<Duration>,
 }
 
 impl RuntimeConfig {
@@ -205,6 +207,7 @@ async fn create_operator_state<T: Executor>(
         operator_name,
         tracking_label_name,
         ownership_label_name,
+        resync_period,
         ..
     } = config;
 
@@ -248,6 +251,7 @@ async fn create_operator_state<T: Executor>(
         correlation_label_name: tracking_label_name,
         controller_label_name: ownership_label_name,
         operator_name,
+        resync_period,
     });
 
     OperatorState {
@@ -271,10 +275,51 @@ struct InProgressUpdate {
     start_time: Instant,
 }
 
+#[derive(Debug)]
+struct CappedBackoff(ExponentialBackoff);
+
+impl Backoff for CappedBackoff {
+    fn next_backoff(&mut self) -> Option<Duration> { let CappedBackoff(exp) = self; exp.next_backoff() }
+    fn reset(&mut self) { let CappedBackoff(exp) = self; exp.reset() }
+}
+
+impl Default for CappedBackoff {
+    fn default() -> Self {
+        let mut sync_timer = ExponentialBackoff {
+            initial_interval: Duration::from_millis(100),
+            max_elapsed_time: None,
+            ..Default::default()
+        };
+        sync_timer.reset();
+
+        CappedBackoff(sync_timer)
+    }
+}
+
+impl CappedBackoff {
+    fn with_sync_interval(self, period: Option<Duration>) -> CappedBackoff {
+        let CappedBackoff(mut exp) = self;
+        match period {
+            Some(interval) => {
+               exp.max_interval = interval;
+            }, None => {
+                // disable jitter and set the multiplier to 1.
+                // this disables the exponential backoff.
+                exp.randomization_factor = 0.0;
+                exp.multiplier = 1.0;
+            }
+        };
+        exp.reset();
+
+        CappedBackoff(exp)
+    }
+}
+
 #[derive(Debug, Default)]
 struct ParentState {
     in_progress: Option<InProgressUpdate>,
     sync_counter: u32,
+    sync_timer: CappedBackoff,
 }
 
 impl ParentState {
@@ -398,7 +443,12 @@ impl<T: Executor> OperatorState<T> {
         );
 
         let request = self.create_sync_request(parent).await?;
-        let parent_state = self.parent_states.entry(parent_uid.to_owned()).or_default();
+        let sync_timer = CappedBackoff::default().with_sync_interval(self.runtime_config.resync_period);
+        let def_parent = ParentState {
+            sync_timer,
+            ..Default::default()
+        };
+        let parent_state = self.parent_states.entry(parent_uid.to_owned()).or_insert(def_parent);
         parent_state.start_sync(parent_id);
 
         let handler = SyncHandler {
@@ -510,16 +560,14 @@ impl<T: Executor> OperatorState<T> {
         let uid = index_key.unwrap();
         match event_type {
             EventType::UpdateOperationComplete { resync } => {
-                let in_progress = self
-                    .parent_states
-                    .get_mut(&uid)
-                    .and_then(ParentState::sync_finished);
+                let in_progress = self.parent_states.get_mut(&uid).and_then(ParentState::sync_finished);
 
                 // sanity check to ensure that there was actually an update in progress
                 // if not, then we'll log the error and ignore this message, since this indicates
                 // that there's a bug in roperator
                 if let Some(prev) = in_progress {
                     let duration_millis = duration_to_millis(prev.start_time.elapsed());
+                    let parent = self.parent_states.get_mut(&uid).expect("fatal error: somehow got resync from nonexistent parent.");
                     log::info!(
                         "Completed sync of parent: {} with uid: {} in {}ms, needs retry: {}",
                         resource_id,
@@ -528,14 +576,13 @@ impl<T: Executor> OperatorState<T> {
                         resync.is_some()
                     );
                     if let Some(duration) = resync {
-                        if duration_to_millis(duration) == 0 {
-                            // if the desire is to re-sync immediately, then we'll just trigger it
-                            // now and bypass the scheduling
-                            to_sync.insert(uid);
-                            log::info!("Triggering immediate re-sync on parent: {}", resource_id);
-                        } else {
-                            self.schedule_resync(&uid, resource_id, duration);
-                        }
+                        // calculate the backoff. the resync interval is a lower bound and the configured resync_period forms the upper bound.
+                        // when resync_period is None, backoff should always be zero.
+                        let backoff_period = parent.sync_timer.next_backoff().expect("fatal error: somehow exceeded unbounded max elapsed backoff time.");
+                        self.schedule_resync(&uid, resource_id, backoff_period + duration);
+                    } else {
+                        // Reset the backoff timer as no further automatic resyncing will be done and future resyncs are for a different update.
+                        parent.sync_timer.reset();
                     }
                 } else {
                     log::error!("Got updateOperationComplete when there was no in-progress operation for uid: {}", uid);

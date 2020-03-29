@@ -27,7 +27,7 @@
 //! // this function will block the current thread indifinitely while the operator runs
 //! run_operator(operator_config, handle_sync);
 //!
-//! fn handle_sync(request: &SyncRequest) -> Result<SyncResponse, Error> {
+//! fn handle_sync(request: &SyncRequest) -> SyncResponse {
 //!     // for this tiny example, we'll only create a single Pod. You can also use any of the types
 //!     // defined in the k8s_openapi crate, which has serializable structs for all the usual resources
 //!     let pod = json!({
@@ -53,11 +53,11 @@
 //!         // normally, we'd derive the status by taking a look at the existing `children` in the request
 //!         "message": "everything looks good here!",
 //!     });
-//!     Ok(SyncResponse {
+//!     SyncResponse {
 //!         status,
 //!         children: vec![pod],
 //!         resync: None,
-//!     })
+//!     }
 //! }
 //! ```
 //!
