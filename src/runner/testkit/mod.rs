@@ -550,7 +550,7 @@ struct SyncRecord {
     finalize_count: usize,
     finalize_errors: usize,
     last_sync_request: Option<SyncRequest>,
-    last_sync_response: Option<Result<SyncResponse, String>>,
+    last_sync_response: Option<SyncResponse>,
     last_finalize_request: Option<SyncRequest>,
     last_finalize_response: Option<Result<FinalizeResponse, String>>,
 }
@@ -561,16 +561,8 @@ impl SyncRecord {
         self.last_sync_request = Some(req.clone());
     }
 
-    fn sync_finished(&mut self, resp: &Result<SyncResponse, Error>) {
-        match resp.as_ref() {
-            Ok(response) => {
-                self.last_sync_response = Some(Ok(response.clone()));
-            }
-            Err(e) => {
-                self.sync_errors += 1;
-                self.last_sync_response = Some(Err(format!("Handler error: {}", e)));
-            }
-        }
+    fn sync_finished(&mut self, resp: &SyncResponse) {
+        self.last_sync_response = Some(resp.clone());
     }
 
     fn finalize_started(&mut self, req: &SyncRequest) {
@@ -648,7 +640,7 @@ impl InstrumentedHandler {
 }
 
 impl Handler for InstrumentedHandler {
-    fn sync(&self, req: &SyncRequest) -> Result<SyncResponse, Error> {
+    fn sync(&self, req: &SyncRequest) -> SyncResponse {
         let InstrumentedHandler {
             ref wrapped,
             ref records,
