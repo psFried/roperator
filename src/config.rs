@@ -7,7 +7,7 @@ use crate::k8s_types::K8sType;
 
 use std::collections::HashMap;
 use std::io;
-use std::{time::Duration, path::Path};
+use std::{path::Path, time::Duration};
 
 /// Default label that's added to all child resources, so that roperator can track the ownership of resources.
 /// The value is the `metadata.uid` of the parent.
