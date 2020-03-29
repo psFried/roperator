@@ -156,14 +156,17 @@ where
     SyncFn: Fn(&SyncRequest) -> Result<SyncResponse, Error> + Send + Sync + 'static,
     ErrorFn: Fn(&SyncRequest, Error) -> (Value, Option<Duration>) + Send + Sync + 'static,
 {
-
     fn sync(&self, req: &SyncRequest) -> SyncResponse {
         let (sync_fun, handle_error) = self;
         match sync_fun(req) {
             Ok(resp) => resp,
             Err(err) => {
                 let (status, resync) = handle_error(req, err);
-                SyncResponse { status, resync, children: Vec::new() }
+                SyncResponse {
+                    status,
+                    resync,
+                    children: Vec::new(),
+                }
             }
         }
     }
