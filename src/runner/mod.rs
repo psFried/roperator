@@ -315,7 +315,7 @@ impl CappedBackoff {
                 exp.randomization_factor = 0.0;
                 exp.multiplier = 1.0;
                 // ensure resync requested is guaranteed.
-                exp.initial_interval = 0;
+                exp.initial_interval = Duration::from_secs(0);
                 exp.max_interval = Duration::from_secs(0);
             }
         };
