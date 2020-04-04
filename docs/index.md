@@ -23,3 +23,7 @@ Generated docs, hosted by docs.rs.
 ## [Upgrade Guide](guide/upgrade_guide.md)
 
 For information on upgrading from older versions.
+
+## [Contributors Guide](contributors-guide.md)
+
+Contributions are welcome. No matter who you are or what your level of experience, there's ways that you can contribute if you want to. See this guide for information on how to help.
