@@ -115,6 +115,10 @@ Some of the things that will definitely need addressed prior to the 1.0 release 
 - Settle on a more consistent and simple API for the `TestKit`
 - Settle on a simpler API for running multiple operators in the same process
 
+### Contributions are Welcome
+
+Contributions are welcome and appreciated. Please check out the [Contributors Guide](https://psfried.github.io/roperator/contributors-guide.html) for more information.
+
 ### License
 
 Licensed under either of Apache License, Version 2.0 or MIT license at your option.
