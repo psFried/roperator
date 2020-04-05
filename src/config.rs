@@ -110,7 +110,7 @@ pub struct OperatorConfig {
 
     //// This is used to space out the time between `Handler::sync()` calls on the same parent resource in a uniform way. If `None`, no exponential backoff is performed.
     /// maximum period between requested resyncs
-    pub resync_period: Option<Duration>,
+    pub max_error_backoff: Duration,
 }
 
 impl OperatorConfig {
@@ -126,7 +126,7 @@ impl OperatorConfig {
             server_port: 8080,
             expose_metrics: true,
             expose_health: true,
-            resync_period: Some(Duration::from_secs(60)),
+            max_error_backoff: Duration::from_secs(600),
         }
     }
 
@@ -162,8 +162,8 @@ impl OperatorConfig {
         self
     }
 
-    pub fn resync_period(mut self, period: Option<Duration>) -> Self {
-        self.resync_period = period;
+    pub fn max_error_backoff(mut self, max_error_backoff: Duration) -> Self {
+        self.max_error_backoff = max_error_backoff;
         self
     }
 }
