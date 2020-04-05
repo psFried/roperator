@@ -23,24 +23,22 @@ pub(crate) async fn handle_finalize(handler: SyncHandler) {
     let parent_type = runtime_config.parent_type;
 
     let result = get_finalize_result(request, handler, client, &*runtime_config).await;
-    let retry = match result {
+    let update_result = match result {
         Ok(retry) => {
             log::debug!(
                 "Finalize handler for parent: {} completed without error",
                 parent_id
             );
-            retry
+            Ok(retry)
         }
         Err(err) => {
             runtime_config.metrics.parent_sync_error(&parent_id_ref);
             log::error!("Failed to finalize parent: {}, err: {}", parent_id, err);
-            // here again, we should change this to use an incremental backoff instead of these fixed delays
-            tokio::timer::delay_for(Duration::from_secs(5)).await;
-            Some(Duration::from_millis(0))
+            Err(())
         }
     };
     let message = ResourceMessage {
-        event_type: EventType::UpdateOperationComplete { resync: retry },
+        event_type: EventType::UpdateOperationComplete { result: update_result },
         resource_type: parent_type,
         resource_id: parent_id,
         index_key: Some(parent_index_key),

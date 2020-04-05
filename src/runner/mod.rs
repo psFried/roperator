@@ -145,7 +145,7 @@ pub(crate) struct RuntimeConfig {
     pub correlation_label_name: String,
     pub controller_label_name: String,
     pub operator_name: String,
-    pub resync_period: Option<Duration>,
+    pub max_error_backoff: Duration,
 }
 
 impl RuntimeConfig {
@@ -207,7 +207,7 @@ async fn create_operator_state<T: Executor>(
         operator_name,
         tracking_label_name,
         ownership_label_name,
-        resync_period,
+        max_error_backoff,
         ..
     } = config;
 
@@ -251,7 +251,7 @@ async fn create_operator_state<T: Executor>(
         correlation_label_name: tracking_label_name,
         controller_label_name: ownership_label_name,
         operator_name,
-        resync_period,
+        max_error_backoff,
     });
 
     OperatorState {
@@ -271,7 +271,6 @@ type HandlerRef = Arc<dyn Handler>;
 
 #[derive(Debug)]
 struct InProgressUpdate {
-    parent_id: ObjectId,
     start_time: Instant,
 }
 
@@ -303,27 +302,17 @@ impl Default for CappedBackoff {
 }
 
 impl CappedBackoff {
-    fn with_sync_interval(self, period: Option<Duration>) -> CappedBackoff {
-        let CappedBackoff(mut exp) = self;
-        match period {
-            Some(interval) => {
-                exp.max_interval = interval;
-            }
-            None => {
-                // disable jitter and set the multiplier to 1.
-                // this disables the exponential backoff.
-                exp.randomization_factor = 0.0;
-                exp.multiplier = 1.0;
-                // ensure resync requested is guaranteed.
-                exp.initial_interval = Duration::from_secs(0);
-                exp.max_interval = Duration::from_secs(0);
-            }
-        };
-        exp.reset();
-
-        CappedBackoff(exp)
+    fn new(max_backoff: Duration) -> CappedBackoff {
+        CappedBackoff(ExponentialBackoff {
+            initial_interval: Duration::from_millis(100),
+            max_elapsed_time: None,
+            max_interval: max_backoff,
+            ..Default::default()
+        })
     }
 }
+
+struct Resync(Duration, u32);
 
 #[derive(Debug, Default)]
 struct ParentState {
@@ -333,16 +322,50 @@ struct ParentState {
 }
 
 impl ParentState {
-    fn start_sync(&mut self, id: ObjectId) {
+
+    fn new(backoff: CappedBackoff) -> ParentState {
+        ParentState {
+            in_progress: None,
+            sync_counter: 0,
+            sync_timer: backoff,
+        }
+
+    }
+
+    fn start_sync(&mut self) {
         self.sync_counter += 1;
         self.in_progress = Some(InProgressUpdate {
-            parent_id: id,
             start_time: Instant::now(),
         })
     }
 
-    fn sync_finished(&mut self) -> Option<InProgressUpdate> {
-        self.in_progress.take()
+    fn sync_finished(&mut self, parent_id: &ObjectId, parent_uid: &str, sync_result: Result<Option<Duration>, ()>) -> Option<Resync> {
+        if let Some(in_progress) = self.in_progress.take() {
+            let duration_millis = duration_to_millis(in_progress.start_time.elapsed());
+            let needs_resync = sync_result.as_ref().map(Option::is_some).unwrap_or(true);
+            log::info!(
+                "Completed sync of parent: {} with uid: {} in {}ms, needs retry: {}",
+                parent_id,
+                parent_uid,
+                duration_millis,
+                needs_resync,
+            );
+            let sync_count = self.sync_counter;
+
+            match sync_result {
+                Ok(resync) => {
+                    self.sync_timer.reset();
+                    resync.map(|duration| Resync(duration, sync_count))
+                }
+                Err(()) => {
+                    self.sync_timer.next_backoff().map(|duration| Resync(duration, sync_count))
+                }
+            }
+
+        } else {
+            log::error!("Got updateOperationComplete when there was no in-progress operation for uid: {}", parent_uid);
+            None
+        }
     }
 
     fn is_update_in_progress(&self) -> bool {
@@ -445,25 +468,16 @@ impl<T: Executor> OperatorState<T> {
             }
         };
 
-        let parent_id = parent.get_object_id().to_owned();
         log::info!(
             "Starting sync request for parent: '{}' with uid: '{}'",
-            parent_id,
+            parent.get_object_id(),
             parent.uid()
         );
 
         let request = self.create_sync_request(parent).await?;
-        let sync_timer =
-            CappedBackoff::default().with_sync_interval(self.runtime_config.resync_period);
-        let def_parent = ParentState {
-            sync_timer,
-            ..Default::default()
-        };
-        let parent_state = self
-            .parent_states
-            .entry(parent_uid.to_owned())
-            .or_insert(def_parent);
-        parent_state.start_sync(parent_id);
+
+        let parent_state = self.get_or_create_parent_state(parent_uid);
+        parent_state.start_sync();
 
         let handler = SyncHandler {
             sender: self.sender.clone(),
@@ -475,6 +489,14 @@ impl<T: Executor> OperatorState<T> {
         };
         handler.start_sync();
         Ok(())
+    }
+
+    fn get_or_create_parent_state<'a, 'b>(&'a mut self, parent_uid: &'b str) -> &'a mut ParentState {
+        if !self.parent_states.contains_key(parent_uid) {
+            let parent_state = ParentState::new(CappedBackoff::new(self.runtime_config.max_error_backoff));
+            self.parent_states.insert(parent_uid.to_owned(), parent_state);
+        }
+        self.parent_states.get_mut(parent_uid).unwrap()
     }
 
     async fn create_sync_request(&self, parent: K8sResource) -> Result<SyncRequest, Error> {
@@ -573,41 +595,17 @@ impl<T: Executor> OperatorState<T> {
         } = message;
         let uid = index_key.unwrap();
         match event_type {
-            EventType::UpdateOperationComplete { resync } => {
-                let in_progress = self
-                    .parent_states
-                    .get_mut(&uid)
-                    .and_then(ParentState::sync_finished);
-
+            EventType::UpdateOperationComplete { result } => {
                 // sanity check to ensure that there was actually an update in progress
                 // if not, then we'll log the error and ignore this message, since this indicates
                 // that there's a bug in roperator
-                if let Some(prev) = in_progress {
-                    let duration_millis = duration_to_millis(prev.start_time.elapsed());
-                    let parent = self
-                        .parent_states
-                        .get_mut(&uid)
-                        .expect("fatal error: somehow got resync from nonexistent parent.");
-                    log::info!(
-                        "Completed sync of parent: {} with uid: {} in {}ms, needs retry: {}",
-                        resource_id,
-                        uid,
-                        duration_millis,
-                        resync.is_some()
-                    );
-                    if let Some(duration) = resync {
-                        // calculate the backoff. the resync interval is a lower bound and the configured resync_period forms the upper bound.
-                        // when resync_period is None, backoff should always be zero.
-                        let backoff_period = parent.sync_timer.next_backoff().expect(
-                            "fatal error: somehow exceeded unbounded max elapsed backoff time.",
-                        );
-                        self.schedule_resync(&uid, resource_id, backoff_period + duration);
-                    } else {
-                        // Reset the backoff timer as no further automatic resyncing will be done and future resyncs are for a different update.
-                        parent.sync_timer.reset();
-                    }
+                let maybe_resync = if let Some(parent_state) = self.parent_states.get_mut(&uid) {
+                    parent_state.sync_finished(&resource_id, &uid, result)
                 } else {
-                    log::error!("Got updateOperationComplete when there was no in-progress operation for uid: {}", uid);
+                    None
+                };
+                if let Some(Resync(duration, sync_counter)) = maybe_resync {
+                    self.schedule_resync(&uid, resource_id, duration, sync_counter);
                 }
             }
             EventType::Deleted if resource_type == self.runtime_config.parent_type => {
@@ -646,17 +644,12 @@ impl<T: Executor> OperatorState<T> {
         }
     }
 
-    fn schedule_resync(&mut self, uid: &str, parent_id: ObjectId, duration: Duration) {
+    fn schedule_resync(&mut self, uid: &str, parent_id: ObjectId, duration: Duration, sync_counter: u32) {
         let mut sender = self.sender.clone();
-        let sync_count = self
-            .parent_states
-            .get(uid)
-            .map(|ps| ps.sync_counter)
-            .unwrap_or(0);
         log::trace!(
             "scheduling resync for parent: {} with sync_counter: {} for {}ms in the future",
             parent_id,
-            sync_count,
+            sync_counter,
             duration_to_millis(duration)
         );
         let resource_type = self.runtime_config.parent_type;
@@ -668,11 +661,11 @@ impl<T: Executor> OperatorState<T> {
                 log::trace!(
                     "sending resync message for parent: {} with sync_counter: {}",
                     parent_id,
-                    sync_count
+                    sync_counter
                 );
                 let message = ResourceMessage {
                     event_type: EventType::TriggerResync {
-                        resync_round: sync_count,
+                        resync_round: sync_counter,
                     },
                     resource_type,
                     resource_id: parent_id,
@@ -705,4 +698,84 @@ pub(crate) fn duration_to_millis(duration: Duration) -> u64 {
         millis = millis.saturating_add(nanos / 1_000_000)
     }
     millis
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parent_state_backoff_increases_exponentially() {
+        let parent_id = ObjectId::new("foo".to_owned(), "bar".to_owned());
+        let parent_uid = "test-uid";
+        let max_backoff = Duration::from_secs(10);
+
+        // we set this up to disable the jitter for the test, so we can reliably assert that
+        // it gets bigger after each error
+        let backoff = CappedBackoff(ExponentialBackoff {
+            initial_interval: Duration::from_millis(100),
+            randomization_factor: 0.0,
+            max_interval: max_backoff,
+            max_elapsed_time: None,
+            ..Default::default()
+        });
+        let mut subject = ParentState::new(backoff);
+
+        let mut last_duration = Duration::from_secs(0);
+        for i in 1..20 {
+            subject.start_sync();
+            let result = subject.sync_finished(&parent_id, parent_uid, Err(()));
+            let Resync(duration, counter) = result.expect("expected result to be Some but it was None");
+
+            assert_eq!(i, counter);
+            assert!(duration >= last_duration);
+            assert!(duration <= max_backoff);
+            last_duration = duration;
+        }
+        assert_eq!(last_duration, max_backoff);
+    }
+
+    #[test]
+    fn parent_state_backoff_is_reset_after_successful_sync() {
+        let parent_id = ObjectId::new("foo".to_owned(), "bar".to_owned());
+        let parent_uid = "test-uid";
+        let max_backoff = Duration::from_secs(10);
+
+        let mut subject = ParentState::new(CappedBackoff::new(max_backoff));
+        let mut last_duration = Duration::from_secs(0);
+        for _ in 0..10 {
+            subject.start_sync();
+            let result = subject.sync_finished(&parent_id, parent_uid, Err(()));
+            let Resync(duration, _) = result.expect("expected result to be Some but it was None");
+            last_duration = duration;
+        }
+
+        subject.start_sync();
+        let result = subject.sync_finished(&parent_id, parent_uid, Ok(None));
+        assert!(result.is_none());
+
+        subject.start_sync();
+        let Resync(duration, counter) = subject.sync_finished(&parent_id, parent_uid, Err(()))
+                .expect("expected result to be Some but it was None");
+
+        // the duration should have started incrementing from the beginning
+        assert!(duration < last_duration);
+        assert_eq!(12, counter);
+    }
+
+    #[test]
+    fn parent_state_returns_resync_when_duration_is_present_in_sync_result() {
+        let parent_id = ObjectId::new("foo".to_owned(), "bar".to_owned());
+        let parent_uid = "test-uid";
+
+        let mut subject = ParentState::new(CappedBackoff::new(Duration::from_secs(10)));
+
+        let desired_period = Duration::from_secs(42);
+        subject.start_sync();
+        let Resync(duration, _) = subject.sync_finished(&parent_id, parent_uid, Ok(Some(desired_period)))
+                .expect("expected result to be a Resync but was None");
+
+        assert_eq!(desired_period, duration);
+    }
+
 }

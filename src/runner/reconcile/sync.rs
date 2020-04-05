@@ -30,20 +30,19 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
     let start_time = Instant::now();
     let result = private_handle_sync(start_time, request, handler, client, &*runtime_config).await;
 
-    let resync = match result {
+    let update_result = match result {
         Ok(duration) => {
             log::info!("Finished sync for parent: {}", parent_id);
-            duration
+            Ok(duration)
         }
         Err(err) => {
             runtime_config.metrics.parent_sync_error(&parent_id_ref);
             log::error!("Error while syncing parent: {}: {:?}", parent_id, err);
-
-            Some(Duration::from_secs(10))
+            Err(())
         }
     };
     let message = ResourceMessage {
-        event_type: EventType::UpdateOperationComplete { resync },
+        event_type: EventType::UpdateOperationComplete { result: update_result },
         resource_id: parent_id,
         resource_type: runtime_config.parent_type,
         index_key: Some(parent_index_key),
