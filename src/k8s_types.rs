@@ -208,7 +208,8 @@ def_types! {
             ControllerRevision ~ controllerrevisions,
             DaemonSet ~ daemonsets,
             Deployment ~ deployments,
-            ReplicaSet ~ replicasets
+            ReplicaSet ~ replicasets,
+            StatefulSet ~ statefulsets
         ]
     ]
 }
