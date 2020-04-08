@@ -42,7 +42,9 @@ pub(crate) async fn handle_sync(handler: SyncHandler) {
         }
     };
     let message = ResourceMessage {
-        event_type: EventType::UpdateOperationComplete { result: update_result },
+        event_type: EventType::UpdateOperationComplete {
+            result: update_result,
+        },
         resource_id: parent_id,
         resource_type: runtime_config.parent_type,
         index_key: Some(parent_index_key),

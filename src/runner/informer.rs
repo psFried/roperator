@@ -199,8 +199,12 @@ pub enum EventType {
     Updated,
     Finalizing,
     Deleted,
-    UpdateOperationComplete { result: Result<Option<Duration>, ()> },
-    TriggerResync { resync_round: u32 },
+    UpdateOperationComplete {
+        result: Result<Option<Duration>, ()>,
+    },
+    TriggerResync {
+        resync_round: u32,
+    },
 }
 
 #[derive(Debug)]
