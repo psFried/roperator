@@ -322,14 +322,12 @@ struct ParentState {
 }
 
 impl ParentState {
-
     fn new(backoff: CappedBackoff) -> ParentState {
         ParentState {
             in_progress: None,
             sync_counter: 0,
             sync_timer: backoff,
         }
-
     }
 
     fn start_sync(&mut self) {
@@ -339,7 +337,12 @@ impl ParentState {
         })
     }
 
-    fn sync_finished(&mut self, parent_id: &ObjectId, parent_uid: &str, sync_result: Result<Option<Duration>, ()>) -> Option<Resync> {
+    fn sync_finished(
+        &mut self,
+        parent_id: &ObjectId,
+        parent_uid: &str,
+        sync_result: Result<Option<Duration>, ()>,
+    ) -> Option<Resync> {
         if let Some(in_progress) = self.in_progress.take() {
             let duration_millis = duration_to_millis(in_progress.start_time.elapsed());
             let needs_resync = sync_result.as_ref().map(Option::is_some).unwrap_or(true);
@@ -357,13 +360,16 @@ impl ParentState {
                     self.sync_timer.reset();
                     resync.map(|duration| Resync(duration, sync_count))
                 }
-                Err(()) => {
-                    self.sync_timer.next_backoff().map(|duration| Resync(duration, sync_count))
-                }
+                Err(()) => self
+                    .sync_timer
+                    .next_backoff()
+                    .map(|duration| Resync(duration, sync_count)),
             }
-
         } else {
-            log::error!("Got updateOperationComplete when there was no in-progress operation for uid: {}", parent_uid);
+            log::error!(
+                "Got updateOperationComplete when there was no in-progress operation for uid: {}",
+                parent_uid
+            );
             None
         }
     }
@@ -491,10 +497,15 @@ impl<T: Executor> OperatorState<T> {
         Ok(())
     }
 
-    fn get_or_create_parent_state<'a, 'b>(&'a mut self, parent_uid: &'b str) -> &'a mut ParentState {
+    fn get_or_create_parent_state<'a, 'b>(
+        &'a mut self,
+        parent_uid: &'b str,
+    ) -> &'a mut ParentState {
         if !self.parent_states.contains_key(parent_uid) {
-            let parent_state = ParentState::new(CappedBackoff::new(self.runtime_config.max_error_backoff));
-            self.parent_states.insert(parent_uid.to_owned(), parent_state);
+            let parent_state =
+                ParentState::new(CappedBackoff::new(self.runtime_config.max_error_backoff));
+            self.parent_states
+                .insert(parent_uid.to_owned(), parent_state);
         }
         self.parent_states.get_mut(parent_uid).unwrap()
     }
@@ -644,7 +655,13 @@ impl<T: Executor> OperatorState<T> {
         }
     }
 
-    fn schedule_resync(&mut self, uid: &str, parent_id: ObjectId, duration: Duration, sync_counter: u32) {
+    fn schedule_resync(
+        &mut self,
+        uid: &str,
+        parent_id: ObjectId,
+        duration: Duration,
+        sync_counter: u32,
+    ) {
         let mut sender = self.sender.clone();
         log::trace!(
             "scheduling resync for parent: {} with sync_counter: {} for {}ms in the future",
@@ -725,7 +742,8 @@ mod test {
         for i in 1..20 {
             subject.start_sync();
             let result = subject.sync_finished(&parent_id, parent_uid, Err(()));
-            let Resync(duration, counter) = result.expect("expected result to be Some but it was None");
+            let Resync(duration, counter) =
+                result.expect("expected result to be Some but it was None");
 
             assert_eq!(i, counter);
             assert!(duration >= last_duration);
@@ -755,8 +773,9 @@ mod test {
         assert!(result.is_none());
 
         subject.start_sync();
-        let Resync(duration, counter) = subject.sync_finished(&parent_id, parent_uid, Err(()))
-                .expect("expected result to be Some but it was None");
+        let Resync(duration, counter) = subject
+            .sync_finished(&parent_id, parent_uid, Err(()))
+            .expect("expected result to be Some but it was None");
 
         // the duration should have started incrementing from the beginning
         assert!(duration < last_duration);
@@ -772,10 +791,10 @@ mod test {
 
         let desired_period = Duration::from_secs(42);
         subject.start_sync();
-        let Resync(duration, _) = subject.sync_finished(&parent_id, parent_uid, Ok(Some(desired_period)))
-                .expect("expected result to be a Resync but was None");
+        let Resync(duration, _) = subject
+            .sync_finished(&parent_id, parent_uid, Ok(Some(desired_period)))
+            .expect("expected result to be a Resync but was None");
 
         assert_eq!(desired_period, duration);
     }
-
 }
