@@ -312,13 +312,16 @@ impl CappedBackoff {
     }
 }
 
+/// holds the duration to wait before re-sync and the round counter.
+/// The re-sync will only be triggered if the round counter still matches
+/// the sync count after the duration has elapsed.
 struct Resync(Duration, u32);
 
 #[derive(Debug, Default)]
 struct ParentState {
     in_progress: Option<InProgressUpdate>,
     sync_counter: u32,
-    sync_timer: CappedBackoff,
+    error_backoff: CappedBackoff,
 }
 
 impl ParentState {
@@ -326,7 +329,7 @@ impl ParentState {
         ParentState {
             in_progress: None,
             sync_counter: 0,
-            sync_timer: backoff,
+            error_backoff: backoff,
         }
     }
 
@@ -357,11 +360,12 @@ impl ParentState {
 
             match sync_result {
                 Ok(resync) => {
-                    self.sync_timer.reset();
+                    // always reset the error backoff if the result was successful
+                    self.error_backoff.reset();
                     resync.map(|duration| Resync(duration, sync_count))
                 }
                 Err(()) => self
-                    .sync_timer
+                    .error_backoff
                     .next_backoff()
                     .map(|duration| Resync(duration, sync_count)),
             }

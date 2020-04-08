@@ -38,8 +38,10 @@ pub struct SyncResponse {
 
     /// If specified, then this parent will go through the sync process again some time after the given
     /// period. The parent may still be synced sooner if a change is observed in either the parent
-    /// or any children. This period can vary up to the resync_period via exponential backoff when set
-    /// and repeated requests to resync are given.
+    /// or any children. It is not required to set `resync` if you only want to respond to changes
+    /// in the parent and child resources. That will happen anyway. Setting `resync` is only needed
+    /// if you want a time-based resync in addition. The typical use cases are for error handling
+    /// and managing external (non-k8s) resources.
     pub resync: Option<Duration>,
 }
 
@@ -122,18 +124,25 @@ pub trait Handler: Send + Sync + 'static {
     /// that any such operations are idempotent. An example would be an operator that calls out to a service to create a database
     /// schema for each parent custom resource instance. It is a good idea to generate deterministic identifiers for such things
     /// based on some immutable metadata from the parent resource (name, namespace, uid).
-    fn sync(&self, request: &SyncRequest) -> SyncResponse;
+    ///
+    /// If this function returns an `Err`, then roperator will retry calling this function
+    /// after applying a backoff delay.
+    fn sync(&self, request: &SyncRequest) -> Result<SyncResponse, Error>;
 
     /// Finalize is invoked whenever the parent resource starts being deleted. Roperator makes every reasonable attempt to
     /// ensure that this function gets invoked _at least once_ for each parent as it's being deleted. We cannot make any
     /// guarantees, though, since it's possible for Kuberentes resources to be force deleted without waiting for finalizers.
     ///
-    /// The `FinalizeResponse` can return a new parent status, as well as a boolean indicating whether the finalization is
-    /// complete. If the boolean is true, then Roperator will remove itself from the list of parent finalizers, allowing
-    /// kubernetes to proceed with the deletion. If the boolean is false, then Roperator will re-try finalizing again after
-    /// a backoff period.
+    /// The `FinalizeResponse` can return a new parent status, as well as an `Option<Duration>`
+    /// indicating whether the finalization is complete or needs to be retried. If the `retry`
+    /// field is `Some`, then the finalize function will be invoked again after the given duration.
+    /// If it is `None`, then roperator will tell kubernetes to proceed with the deletion.
     ///
-    /// The default implementation of this function simply returns `true` and does not modify the status.
+    /// The default implementation of this function simply allows the deletion to proceed and does
+    /// not modify the status.
+    ///
+    /// If this function returns an `Err`, then roperator will retry calling this function
+    /// after applying a backoff delay.
     fn finalize(&self, request: &SyncRequest) -> Result<FinalizeResponse, Error> {
         Ok(FinalizeResponse {
             status: request.parent.status().cloned().unwrap_or(Value::Null),
@@ -144,9 +153,9 @@ pub trait Handler: Send + Sync + 'static {
 
 impl<F> Handler for F
 where
-    F: Fn(&SyncRequest) -> SyncResponse + Send + Sync + 'static,
+    F: Fn(&SyncRequest) -> Result<SyncResponse, Error> + Send + Sync + 'static,
 {
-    fn sync(&self, req: &SyncRequest) -> SyncResponse {
+    fn sync(&self, req: &SyncRequest) -> Result<SyncResponse, Error> {
         self(req)
     }
 }
@@ -156,18 +165,15 @@ where
     SyncFn: Fn(&SyncRequest) -> Result<SyncResponse, Error> + Send + Sync + 'static,
     ErrorFn: Fn(&SyncRequest, Error) -> (Value, Option<Duration>) + Send + Sync + 'static,
 {
-    fn sync(&self, req: &SyncRequest) -> SyncResponse {
+    fn sync(&self, req: &SyncRequest) -> Result<SyncResponse, Error> {
         let (sync_fun, handle_error) = self;
-        match sync_fun(req) {
-            Ok(resp) => resp,
-            Err(err) => {
-                let (status, resync) = handle_error(req, err);
-                SyncResponse {
-                    status,
-                    resync,
-                    children: Vec::new(),
-                }
-            }
-        }
+        sync_fun(req).or_else(|err| {
+            let (status, resync) = handle_error(req, err);
+            Ok(SyncResponse {
+                status,
+                resync,
+                children: Vec::new(),
+            })
+        })
     }
 }

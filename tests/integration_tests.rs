@@ -118,6 +118,71 @@ fn operator_reconciles_a_parent_with_a_child() {
 }
 
 #[test]
+fn operator_continuously_retries_sync_of_parent_when_handler_returns_error() {
+    let namespace = unique_namespace("error-handler-test");
+    let error_parent_name = "should-error";
+    let normal_parent_name = "should-work";
+    let error_id = ObjectIdRef::new(namespace.as_str(), error_parent_name);
+    let normal_id = ObjectIdRef::new(namespace.as_str(), normal_parent_name);
+
+    let mut testkit = setup(
+        namespace.as_str(),
+        ReturnErrorHandler::new(create_child_handler, namespace.as_str(), error_parent_name),
+    );
+    let error_parent = parent(namespace.as_str(), error_parent_name);
+    testkit
+        .create_resource(PARENT_TYPE, &error_parent)
+        .expect("failed to create parent resource");
+
+    let err = testkit
+        .reconcile(Duration::from_secs(4))
+        .err()
+        .expect("reconciliation succeeded but should have returned error");
+    println!("Got error: {:?}", err);
+    let handler_errors = err
+        .as_type::<HandlerErrors>()
+        .expect("Expected HandlerErrors but got another type");
+    let error_count = handler_errors.get_sync_error_count_for_parent(&error_id);
+    assert!(error_count > 0);
+    let error_state = testkit
+        .get_current_state_for_parent(&error_id)
+        .expect("failed to get children");
+    assert!(error_state.children.is_empty());
+
+    // We want to assert that the error above does not cause any intterruption to syncing other resources, so we create
+    // this "normal" parent and ensure everything works as normal
+    let normal_parent = parent(namespace.as_str(), normal_parent_name);
+    testkit
+        .create_resource(PARENT_TYPE, &normal_parent)
+        .expect("failed to create parent resource");
+    let _ = testkit.reconcile(Duration::from_secs(4));
+
+    // ensure that the normal parent synced without error. This is kinda just as an extra check to ensure that the fixtures are working as expected
+    let should_be_0 = handler_errors
+        .get_sync_error_count_for_parent(&ObjectIdRef::new(namespace.as_str(), normal_parent_name));
+    assert_eq!(0, should_be_0);
+
+    let expected_child = json!({
+        "apiVersion": "roperator.com/v1alpha1",
+        "kind": "TestChildOne",
+        "metadata": {
+            "namespace": namespace.as_str(),
+            "name": normal_parent_name,
+            "labels": {
+                "app.kubernetes.io/name": normal_parent_name
+            }
+        },
+        "spec": {
+            "parentSpec": {
+                "foo": "bar",
+            },
+        }
+    });
+
+    testkit.assert_child_resource_eq(CHILD_ONE_TYPE, &normal_id, expected_child);
+}
+
+#[test]
 fn operator_retries_finalize_when_response_retry_is_some() {
     use std::sync::{
         atomic::{AtomicU64, Ordering},
@@ -128,7 +193,7 @@ fn operator_retries_finalize_when_response_retry_is_some() {
     // Handler that will increment the counter for each finalize call, and return `finalized: true` once it reaches 3
     struct FinalizeHandler(Arc<AtomicU64>);
     impl Handler for FinalizeHandler {
-        fn sync(&self, request: &SyncRequest) -> SyncResponse {
+        fn sync(&self, request: &SyncRequest) -> Result<SyncResponse, Error> {
             create_child_handler(request)
         }
 
@@ -301,20 +366,20 @@ fn handler_is_invoked_after_waiting_when_resync_is_some() {
     let counter = Arc::new(AtomicU64::new(0));
     struct ResyncHandler(Arc<AtomicU64>);
     impl Handler for ResyncHandler {
-        fn sync(&self, _request: &SyncRequest) -> SyncResponse {
+        fn sync(&self, _request: &SyncRequest) -> Result<SyncResponse, Error> {
             let i = self.0.fetch_add(1, Ordering::SeqCst);
             let resync = if i > EXPECTED_SYNCS {
                 None
             } else {
                 Some(Duration::from_millis(5))
             };
-            SyncResponse {
+            Ok(SyncResponse {
                 status: json!({
                     "foo": "bar"
                 }),
                 children: Vec::new(),
                 resync,
-            }
+            })
         }
     }
     let handler = ResyncHandler(counter.clone());
@@ -372,8 +437,15 @@ impl<T: Handler> ReturnErrorHandler<T> {
 }
 
 impl<T: Handler> Handler for ReturnErrorHandler<T> {
-    fn sync(&self, req: &SyncRequest) -> SyncResponse {
-        self.delegate.sync(req)
+    fn sync(&self, req: &SyncRequest) -> Result<SyncResponse, Error> {
+        if self.should_return_error(req) {
+            let index = self
+                .counter
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(Box::new(MockHandlerError(index)))
+        } else {
+            self.delegate.sync(req)
+        }
     }
 
     fn finalize(&self, req: &SyncRequest) -> Result<FinalizeResponse, Error> {
@@ -388,7 +460,7 @@ impl<T: Handler> Handler for ReturnErrorHandler<T> {
     }
 }
 
-fn create_child_handler(req: &SyncRequest) -> SyncResponse {
+fn create_child_handler(req: &SyncRequest) -> Result<SyncResponse, Error> {
     let namespace = req.parent.namespace();
     let name = req.parent.name();
 
@@ -417,12 +489,12 @@ fn create_child_handler(req: &SyncRequest) -> SyncResponse {
         format!("Has {} children", count)
     };
 
-    SyncResponse {
+    Ok(SyncResponse {
         status: json!({
             "message": message,
             "childCount": count,
         }),
         children: vec![child],
         resync: None,
-    }
+    })
 }
