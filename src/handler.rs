@@ -12,14 +12,16 @@ pub mod request;
 #[cfg(not(feature = "test"))]
 mod request;
 
+mod failable;
+
 use crate::error::Error;
 use serde::Serialize;
 use serde_json::Value;
 use std::fmt::{self, Debug};
 use std::time::Duration;
 
+pub use self::failable::{BackoffConfig, DefaultFailableHandler, ErrorBackoff, FailableHandler};
 pub use self::request::{RawView, RequestChildren, SyncRequest, TypedIter, TypedView};
-
 /// The return value from your handler function, which has the status to set for the parent, as well as any
 /// desired child resources. Any existing child resources that are **not** included in this response **will be deleted**.
 #[derive(Deserialize, Serialize, Clone, PartialEq)]
@@ -79,6 +81,9 @@ impl SyncResponse {
         })
     }
 
+    /// sets the `resync` field of the response to `Some(duration)`, which instructs roperator
+    /// to invoke your sync handler after the given time period, regardless of whether any
+    /// changes are observed.
     pub fn resync_after(&mut self, duration: Duration) {
         self.resync = Some(duration);
     }
