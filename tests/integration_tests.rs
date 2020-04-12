@@ -113,7 +113,7 @@ fn operator_reconciles_a_parent_with_a_child() {
         expected_child,
         Duration::from_secs(15),
     );
-    testkit.delete_parent(&id);
+    testkit.delete_parent(&id, Duration::from_secs(10));
     testkit.assert_resource_deleted_eventually(CHILD_ONE_TYPE, &id, Duration::from_secs(30));
 }
 
@@ -240,7 +240,7 @@ fn operator_retries_finalize_when_response_retry_is_some() {
         expected_parent_fields,
         Duration::from_secs(5),
     );
-    testkit.delete_parent(&id);
+    testkit.delete_parent(&id, Duration::from_secs(10));
 
     testkit.assert_resource_deleted_eventually(PARENT_TYPE, &id, Duration::from_secs(30));
     testkit.assert_resource_deleted_eventually(CHILD_ONE_TYPE, &id, Duration::from_secs(20));
@@ -445,17 +445,6 @@ impl<T: Handler> Handler for ReturnErrorHandler<T> {
             Err(Box::new(MockHandlerError(index)))
         } else {
             self.delegate.sync(req)
-        }
-    }
-
-    fn finalize(&self, req: &SyncRequest) -> Result<FinalizeResponse, Error> {
-        if self.should_return_error(req) {
-            let index = self
-                .counter
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Err(Box::new(MockHandlerError(index)))
-        } else {
-            self.delegate.finalize(req)
         }
     }
 }

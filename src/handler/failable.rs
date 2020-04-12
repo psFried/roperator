@@ -61,7 +61,7 @@ impl BackoffConfig {
     /// always the same.
     ///
     /// ```rust
-    /// use roperator::handler::{BackoffConfig, ErrorBackoff};
+    /// use roperator::handler::failable::{BackoffConfig, ErrorBackoff};
     /// use std::time::Duration;
     /// # let request = &roperator::handler::request::test_request();
     /// let interval = Duration::from_millis(500);
@@ -87,7 +87,7 @@ impl BackoffConfig {
     /// `ErrorBackoff::next_error_backoff` to always return `None`.
     ///
     /// ```rust
-    /// use roperator::handler::{BackoffConfig, ErrorBackoff};
+    /// use roperator::handler::failable::{BackoffConfig, ErrorBackoff};
     /// use std::time::Duration;
     /// # let request = &roperator::handler::request::test_request();
     /// let interval = Duration::from_millis(500);
@@ -146,7 +146,8 @@ impl BackoffConfig {
 /// Example:
 ///
 /// ```rust
-/// use roperator::handler::{Handler, ErrorBackoff, SyncRequest, SyncResponse};
+/// use roperator::handler::{Handler, SyncRequest, SyncResponse};
+/// use roperator::handler::failable::ErrorBackoff;
 /// use roperator::error::Error;
 /// use std::io;
 ///
@@ -200,7 +201,7 @@ impl ErrorBackoff {
     /// Example:
     ///
     /// ```rust
-    /// use roperator::handler::{BackoffConfig, ErrorBackoff};
+    /// use roperator::handler::failable::{BackoffConfig, ErrorBackoff};
     /// use std::time::Duration;
     ///
     /// let config = BackoffConfig {
@@ -223,7 +224,7 @@ impl ErrorBackoff {
     /// is called for the parent.
     ///
     /// ```rust
-    /// use roperator::handler::{BackoffConfig, ErrorBackoff};
+    /// use roperator::handler::failable::{BackoffConfig, ErrorBackoff};
     /// # let request = &roperator::handler::request::test_request();
     /// // disable randomization to make backoff durations deterministic for tests
     /// let error_backoff = ErrorBackoff::new(BackoffConfig::default().disable_randomization());
@@ -257,7 +258,7 @@ impl ErrorBackoff {
     /// After this is called, the next error duration will go back down to the `initial_interval`.
     ///
     /// ```rust
-    /// use roperator::handler::{BackoffConfig, ErrorBackoff};
+    /// use roperator::handler::failable::{BackoffConfig, ErrorBackoff};
     /// # let request = &roperator::handler::request::test_request();
     /// let config = BackoffConfig::default().disable_randomization();
     /// let error_backoff = ErrorBackoff::new(config.clone());
@@ -338,7 +339,8 @@ where
 /// Example:
 ///
 /// ```rust,no_run
-/// use roperator::handler::{DefaultFailableHandler, SyncRequest};
+/// use roperator::handler::SyncRequest;
+/// use roperator::handler::failable::DefaultFailableHandler;
 /// use roperator::error::Error;
 /// use serde::{Serialize, Deserialize};
 /// use std::time::Duration;

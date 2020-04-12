@@ -20,7 +20,7 @@ jobs:
           export KUBECONFIG="$(kind get kubeconfig-path)"
           kubectl cluster-info
           kubectl apply -f tests/resources/
-          cargo test --features 'testkit test'
+          cargo test --all-features
 
   fmt:
     name: Rustfmt
@@ -50,4 +50,4 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: "--features testkit -- -D warnings"
+          args: "--all-features -- -D warnings"

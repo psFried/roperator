@@ -60,6 +60,8 @@ pub struct TestKit {
     parents_needing_sync: HashSet<String>,
     delete_namespace_on_drop: bool,
     namespace: Option<String>,
+    parents: HashSet<ObjectId>,
+    cleanup_timeout: Duration,
 }
 
 impl Debug for TestKit {
@@ -90,6 +92,13 @@ impl<T: Serialize + Clone> ToJson for T {
 impl Drop for TestKit {
     fn drop(&mut self) {
         if self.delete_namespace_on_drop {
+            let parents = self.parents.drain().collect::<Vec<_>>();
+            let timeout = self.cleanup_timeout;
+            for parent_id in parents {
+                log::info!("Cleaning up parent: {}", parent_id);
+                self.delete_parent(&parent_id.as_id_ref(), timeout);
+            }
+
             let TestKit {
                 ref namespace,
                 ref client,
@@ -196,6 +205,8 @@ impl TestKit {
             namespace,
             parents_needing_sync: HashSet::new(),
             delete_namespace_on_drop: false,
+            parents: HashSet::new(),
+            cleanup_timeout: Duration::from_secs(10),
         })
     }
 
@@ -210,10 +221,11 @@ impl TestKit {
     }
 
     /// Deletes the parent resource identified by the given id, and panics if the delete fails
-    pub fn delete_parent(&mut self, id: &ObjectIdRef<'_>) {
+    pub fn delete_parent(&mut self, id: &ObjectIdRef<'_>, timeout: Duration) {
         let parent_type = self.state.runtime_config.parent_type;
         self.delete_resource(parent_type, id)
             .expect("failed to delete parent");
+        self.assert_resource_deleted_eventually(parent_type, id, timeout);
     }
 
     /// Asserts that the resource is eventually deleted from the kubernetes cluster. This will cause the reconciliation loop to
@@ -467,8 +479,18 @@ impl TestKit {
         let TestKit {
             ref client,
             ref mut runtime,
+            ref mut parents,
+            ref state,
             ..
         } = *self;
+
+        if k8s_type == state.runtime_config.parent_type {
+            // determine the id of the parent and hang onto it so that we can remember to delete it later
+            let name = new_resource.pointer("/metadata/name").and_then(Value::as_str).expect("parent has no name");
+            let namespace = new_resource.pointer("/metadata/namespace").and_then(Value::as_str).unwrap_or("");
+            let id = ObjectId::new(namespace.to_owned(), name.to_owned());
+            parents.insert(id);
+        }
         runtime.block_on(async { client.create_resource(k8s_type, new_resource).await })?;
         Ok(())
     }
