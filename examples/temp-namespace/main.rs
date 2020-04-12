@@ -4,14 +4,14 @@
 //!
 //! This example uses the `DefaultFailableHandler` to wrap a `FailableHandler` impl. This
 //! provides a somewhat more opinionated and simpler interface that makes it easy to have proper
-//! error handling and visibility.
+//! error handling and visibility. This requires the "failable" feature to be enabled.
 #[macro_use]
 extern crate serde_derive;
 
 use chrono::offset::Utc;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time};
 use roperator::config::{ClientConfig, Credentials, KubeConfig};
-use roperator::handler::{DefaultFailableHandler, FailableHandler};
+use roperator::handler::failable::{DefaultFailableHandler, FailableHandler};
 use roperator::prelude::{k8s_types, ChildConfig, K8sType, OperatorConfig, SyncRequest};
 use roperator::serde_json::{json, Value};
 use serde::de::{self, Deserialize, Deserializer};

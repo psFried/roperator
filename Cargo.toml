@@ -47,6 +47,7 @@ chrono = "^0.4"
 [features]
 default = []
 testkit = []
+failable = []
 # The reason we do this is because doctests don't get cfg(test)
 # See: https://github.com/rust-lang/cargo/issues/4669
 test = []
@@ -54,3 +55,7 @@ test = []
 [[test]]
 name = "integration_tests"
 required-features = ["testkit"]
+
+[[examples]]
+name = "temp-namespace"
+required-features = ["failable"]

@@ -5,6 +5,10 @@
 //! snapshot of the state of a given parent resource, along with any children that currently exist for it.
 //! This request struct has lots of functions on it for accessing and deserializing child resources.
 
+/// Helpers for implementing handlers that may recover from their own errors
+#[cfg(feature = "failable")]
+pub mod failable;
+
 // only expose the reqeust mod during tests.
 #[cfg(feature = "test")]
 pub mod request;
@@ -12,15 +16,12 @@ pub mod request;
 #[cfg(not(feature = "test"))]
 mod request;
 
-mod failable;
-
 use crate::error::Error;
 use serde::Serialize;
 use serde_json::Value;
 use std::fmt::{self, Debug};
 use std::time::Duration;
 
-pub use self::failable::{BackoffConfig, DefaultFailableHandler, ErrorBackoff, FailableHandler};
 pub use self::request::{RawView, RequestChildren, SyncRequest, TypedIter, TypedView};
 /// The return value from your handler function, which has the status to set for the parent, as well as any
 /// desired child resources. Any existing child resources that are **not** included in this response **will be deleted**.
