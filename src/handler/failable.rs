@@ -547,7 +547,7 @@ impl<H: FailableHandler> Handler for DefaultFailableHandler<H> {
             .inner
             .finalize(request)
             .err()
-            .map(|e| HandlerResult::FinalizeFailed(e))
+            .map(HandlerResult::FinalizeFailed)
             .unwrap_or(HandlerResult::FinalizeSuccess);
 
         let retry = if result.is_error() {
