@@ -280,6 +280,57 @@ impl ErrorBackoff {
     }
 }
 
+/// Provides the outcome of failable validation and sync_children functions for use
+/// in determining the desired status of the parent resource.
+#[derive(Debug, PartialEq, Clone)]
+pub enum HandlerResult<V, E> {
+    /// The given error was returned by the `validate` function
+    ValidationFailed(E),
+
+    /// validation was successful, but `sync_children` returned an error
+    SyncFailed(V, E),
+
+    /// Finalize failed
+    FinalizeFailed(E),
+
+    /// both `validate` and `sync_children` were successful
+    SyncSuccess(V),
+
+    /// Finalize call was successful
+    FinalizeSuccess,
+}
+
+impl<V, E> HandlerResult<V, E> {
+    pub fn is_success(&self) -> bool {
+        match self {
+            HandlerResult::SyncSuccess(_) => true,
+            HandlerResult::FinalizeSuccess => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_error(&self) -> bool {
+        !self.is_success()
+    }
+
+    pub fn into_error(self) -> Option<E> {
+        match self {
+            HandlerResult::ValidationFailed(e) => Some(e),
+            HandlerResult::SyncFailed(_, e) => Some(e),
+            HandlerResult::FinalizeFailed(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn into_validated(self) -> Option<V> {
+        match self {
+            HandlerResult::SyncFailed(v, _) => Some(v),
+            HandlerResult::SyncSuccess(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+
 /// An optional trait for creating handlers that want to recover from their own errors.
 /// This provides an opinionated base that should work well for most operators.
 /// Sync and finalize operations are broken down into separate steps, one for the action
@@ -289,19 +340,28 @@ impl ErrorBackoff {
 /// provides a default implementation of `finalize` for common cases where no special finalization
 /// logic is required.
 ///
-/// Unlike the base `Handler` trait, `FailableHandler` impls may use any eror type they wish,
+/// Unlike the base `Handler` trait, `FailableHandler` impls may use any error type they wish,
 /// even those that are not `Send` or `'static`.
+///
 pub trait FailableHandler: Send + Sync + 'static {
+    type Validated;
     type Error: Debug;
     type Status: serde::Serialize + serde::de::DeserializeOwned;
 
+    fn validate(&self, request: &SyncRequest) -> Result<Self::Validated, Self::Error>;
+
     /// Returns the list of desired children for this parent. This function will be called
     /// in the same was as the base `sync` function, except that it only returns the list of
-    /// children instead of the entire response.
-    fn sync_children(&self, req: &SyncRequest) -> Result<Vec<Value>, Self::Error>;
+    /// children instead of the entire response. If this returns an error, then the error
+    /// will be passed to `determine_status`.
+    fn sync_children(
+        &self,
+        validated: &mut Self::Validated,
+        req: &SyncRequest,
+    ) -> Result<Vec<Value>, Self::Error>;
 
     /// Finalize this parent. The default implementation simply allows the deletion to proceed
-    /// as normal.
+    /// as normal. If this returns an error, then the error will be passed to `determine_status`.
     fn finalize(&self, _req: &SyncRequest) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -310,7 +370,11 @@ pub trait FailableHandler: Send + Sync + 'static {
     /// resources and whether an error was returned by `sync_children` or `finalize`. If an
     /// error was returned, then it will be passed to this function so that it can be described
     /// in the status.
-    fn determine_status(&self, req: &SyncRequest, error: Option<Self::Error>) -> Self::Status;
+    fn determine_status(
+        &self,
+        req: &SyncRequest,
+        result: HandlerResult<Self::Validated, Self::Error>,
+    ) -> Self::Status;
 }
 
 impl<Syncf, Sf, Status, E> FailableHandler for (Syncf, Sf)
@@ -320,14 +384,28 @@ where
     Syncf: Fn(&SyncRequest) -> Result<Vec<Value>, E> + Send + Sync + 'static,
     Sf: Fn(&SyncRequest, Option<E>) -> Status + Send + Sync + 'static,
 {
+    type Validated = ();
     type Error = E;
     type Status = Status;
 
-    fn sync_children(&self, req: &SyncRequest) -> Result<Vec<Value>, Self::Error> {
+    fn validate(&self, _request: &SyncRequest) -> Result<Self::Validated, Self::Error> {
+        Ok(())
+    }
+
+    fn sync_children(
+        &self,
+        _: &mut Self::Validated,
+        req: &SyncRequest,
+    ) -> Result<Vec<Value>, Self::Error> {
         (self.0)(req)
     }
 
-    fn determine_status(&self, req: &SyncRequest, error: Option<Self::Error>) -> Self::Status {
+    fn determine_status(&self, req: &SyncRequest, result: HandlerResult<(), E>) -> Self::Status {
+        let error = match result {
+            HandlerResult::ValidationFailed(e) => Some(e),
+            HandlerResult::SyncFailed(_, e) => Some(e),
+            _ => None,
+        };
         (self.1)(req, error)
     }
 }
@@ -417,23 +495,34 @@ impl<F: FailableHandler> DefaultFailableHandler<F> {
 
 impl<H: FailableHandler> Handler for DefaultFailableHandler<H> {
     fn sync(&self, request: &SyncRequest) -> Result<SyncResponse, Error> {
-        let (error, children, resync) = match self.inner.sync_children(request) {
-            Ok(kids) => {
-                self.error_backoff.reset_backoff(request);
-                (None, kids, self.regular_resync)
-            }
-            Err(err) => {
-                log::error!(
-                    "sync_children for parent: {} returned error: {:?}",
-                    request.parent.get_object_id(),
-                    err
+        let mut children = Vec::new();
+        let sync_result = match self.inner.validate(request) {
+            Ok(mut validated) => {
+                log::debug!(
+                    "validation succeeded for parent: {}",
+                    request.parent.get_object_id()
                 );
-                let duration = self.error_backoff.next_error_backoff(request);
-                (Some(err), Vec::new(), duration)
+                match self.inner.sync_children(&mut validated, request) {
+                    Ok(kids) => {
+                        log::debug!("sync_children succeeded for parent: {} and returned {} child resources",
+                            request.parent.get_object_id(),
+                            kids.len());
+                        children = kids;
+                        HandlerResult::SyncSuccess(validated)
+                    }
+                    Err(err) => HandlerResult::SyncFailed(validated, err),
+                }
             }
+            Err(validation_err) => HandlerResult::ValidationFailed(validation_err),
         };
 
-        let status = self.inner.determine_status(request, error);
+        let resync = if sync_result.is_error() {
+            self.error_backoff.next_error_backoff(request)
+        } else {
+            self.error_backoff.reset_backoff(request);
+            self.regular_resync
+        };
+        let status = self.inner.determine_status(request, sync_result);
 
         // if there's a serialization error, then we'll rely on roperator's builtin backoff.
         // These error conditions are expected to be pretty rare.
@@ -454,20 +543,21 @@ impl<H: FailableHandler> Handler for DefaultFailableHandler<H> {
     }
 
     fn finalize(&self, request: &SyncRequest) -> Result<FinalizeResponse, Error> {
-        let error = self.inner.finalize(request).err();
+        let result = self
+            .inner
+            .finalize(request)
+            .err()
+            .map(|e| HandlerResult::FinalizeFailed(e))
+            .unwrap_or(HandlerResult::FinalizeSuccess);
 
-        let retry = if let Some(err) = error.as_ref() {
-            log::error!(
-                "Failed to finalize parent: {}, err: {:?}",
-                request.parent.get_object_id(),
-                err
-            );
+        let retry = if result.is_error() {
             self.error_backoff.next_error_backoff(request)
         } else {
             self.error_backoff.reset_backoff(request);
             None
         };
-        let status_struct = self.inner.determine_status(request, error);
+
+        let status_struct = self.inner.determine_status(request, result);
         let status = serde_json::to_value(status_struct).map_err(|err| {
             log::error!(
                 "Failed to serialize status of parent: {}, err: {:?}",

@@ -11,7 +11,7 @@ extern crate serde_derive;
 use chrono::offset::Utc;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time};
 use roperator::config::{ClientConfig, Credentials, KubeConfig};
-use roperator::handler::failable::{DefaultFailableHandler, FailableHandler};
+use roperator::handler::failable::{DefaultFailableHandler, FailableHandler, HandlerResult};
 use roperator::prelude::{k8s_types, ChildConfig, K8sType, OperatorConfig, SyncRequest};
 use roperator::serde_json::{json, Value};
 use serde::de::{self, Deserialize, Deserializer};
@@ -82,19 +82,27 @@ pub struct TempNamespaceStatus {
 // and regular re-syncs.
 struct TempNsHandler;
 impl FailableHandler for TempNsHandler {
+    type Validated = TempNamespace;
     type Error = serde_json::Error;
     type Status = TempNamespaceStatus;
 
-    fn sync_children(&self, request: &SyncRequest) -> Result<Vec<Value>, Self::Error> {
-        let temp_ns = request.deserialize_parent::<TempNamespace>()?;
-        let time_remaining = temp_ns.get_time_remaining();
+    fn validate(&self, request: &SyncRequest) -> Result<Self::Validated, Self::Error> {
+        request.deserialize_parent::<TempNamespace>()
+    }
+
+    fn sync_children(
+        &self,
+        validated: &mut TempNamespace,
+        request: &SyncRequest,
+    ) -> Result<Vec<Value>, Self::Error> {
+        let time_remaining = validated.get_time_remaining();
         log::info!(
             "Namespace: '{}' has {:?} time remaining",
             request.parent.name(),
             time_remaining
         );
         if time_remaining.is_some() {
-            Ok(vec![namespace(&temp_ns)])
+            Ok(vec![namespace(&validated)])
         } else {
             Ok(Vec::new())
         }
@@ -103,7 +111,7 @@ impl FailableHandler for TempNsHandler {
     fn determine_status(
         &self,
         request: &SyncRequest,
-        sync_error: Option<Self::Error>,
+        result: HandlerResult<Self::Validated, Self::Error>,
     ) -> Self::Status {
         let parent = request.deserialize_parent::<TempNamespace>().ok();
         let time_remaining = parent.as_ref().and_then(|p| p.get_time_remaining());
@@ -124,7 +132,10 @@ impl FailableHandler for TempNsHandler {
                 None
             }
         });
-        let error = sync_error.map(|e| format!("invalid TempNamepsace resource: {}", e));
+
+        let error = result
+            .into_error()
+            .map(|e| format!("invalid TempNamepsace resource: {}", e));
         TempNamespaceStatus {
             created_at,
             deleted_at,
