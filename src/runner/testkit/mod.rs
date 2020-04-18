@@ -96,7 +96,7 @@ impl Drop for TestKit {
             let timeout = self.cleanup_timeout;
             for parent_id in parents {
                 log::info!("Cleaning up parent: {}", parent_id);
-                self.delete_parent(&parent_id.as_id_ref(), timeout);
+                self.delete_parent_ignore_errors(&parent_id.as_id_ref(), timeout);
             }
 
             let TestKit {
@@ -226,6 +226,25 @@ impl TestKit {
         self.delete_resource(parent_type, id)
             .expect("failed to delete parent");
         self.assert_resource_deleted_eventually(parent_type, id, timeout);
+    }
+
+    pub fn delete_parent_ignore_errors(&mut self, id: &ObjectIdRef<'_>, timeout: Duration) {
+        let parent_type = self.state.runtime_config.parent_type;
+        let _ = self.delete_resource(parent_type, id);
+
+        let start_time = Instant::now();
+        let reconcile_timeout = std::cmp::min(timeout, Duration::from_millis(250));
+        let mut result = self.reconcile(reconcile_timeout);
+        while self.get_current_state_for_parent(id).is_ok() && start_time.elapsed() < timeout {
+            result = self.reconcile(reconcile_timeout);
+        }
+        if let Err(e) = result {
+            log::warn!(
+                "Ignoring reconciliation error from deletion of parent: {}, err: {:?}",
+                id,
+                e
+            );
+        }
     }
 
     /// Asserts that the resource is eventually deleted from the kubernetes cluster. This will cause the reconciliation loop to
@@ -486,8 +505,14 @@ impl TestKit {
 
         if k8s_type == state.runtime_config.parent_type {
             // determine the id of the parent and hang onto it so that we can remember to delete it later
-            let name = new_resource.pointer("/metadata/name").and_then(Value::as_str).expect("parent has no name");
-            let namespace = new_resource.pointer("/metadata/namespace").and_then(Value::as_str).unwrap_or("");
+            let name = new_resource
+                .pointer("/metadata/name")
+                .and_then(Value::as_str)
+                .expect("parent has no name");
+            let namespace = new_resource
+                .pointer("/metadata/namespace")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             let id = ObjectId::new(namespace.to_owned(), name.to_owned());
             parents.insert(id);
         }
