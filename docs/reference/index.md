@@ -10,6 +10,10 @@ Information on creating `ClientConfig` and authenticating to the Kubernetes API 
 
 How to authenticate with GKE clusters from a development environment
 
+### [Failable Handlers](failable-handlers.md)
+
+How to use the optional `failable` feature for handlers that may return errors
+
 ### [Labels and Tracking](labels-and-tracking.md)
 
 Details on how Roperator uses labels to track Kubernetes resources
