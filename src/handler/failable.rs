@@ -1,6 +1,9 @@
 //! Traits and helpers for creating `Handler` implementations that perform some error
 //! handling. Most use cases are covered by implementing the `FailableHandler` trait
 //! and wrapping your impl in a `DefaultFalableHandler`.
+//!
+//!
+//! **This module is only available when the `failable` feature is enabled in your Cargo.toml**
 use crate::handler::{Error, FinalizeResponse, Handler, SyncRequest, SyncResponse};
 
 use serde_json::Value;

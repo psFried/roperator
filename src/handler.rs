@@ -6,7 +6,7 @@
 //! This request struct has lots of functions on it for accessing and deserializing child resources.
 
 /// Helpers for implementing handlers that may recover from their own errors
-#[cfg(feature = "failable")]
+#[cfg(any(feature = "failable", docs))]
 pub mod failable;
 
 // only expose the reqeust mod during tests.
