@@ -92,6 +92,12 @@ impl Handler for MyHandler {
 }
 ```
 
+## Failable Handlers
+
+This page describes the base `Handler` trait and how to use it. For operators that need to perform some custom validation or
+connect to external systems, you may want to check out the `FailableHandler` trait [described here](../reference/failable-handlers.md)
+as an alternative.
+
 # Next
 
 Put it all together and [run your operator](running.md)!

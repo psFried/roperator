@@ -13,7 +13,24 @@ use std::time::Duration;
 /// Configuration that determines the behavior of an exponential backoff.
 /// The `Default` impl will use an `initial_interval` of 500 milliseconds,
 /// a `max_interval` of 10 minutes, a multiplier of 1.5, and it will never
-/// "give up".
+/// "give up". `BackoffConfig` implements `Default`, so if you only need
+/// to customize a single field, you can use the following syntax:
+///
+/// ```rust
+/// use roperator::handler::failable::BackoffConfig;
+/// use std::time::Duration;
+///
+/// let backoff_config = BackoffConfig {
+///     max_interval: Duration::from_secs(1800),
+///     ..Default::default()
+/// };
+///
+/// assert_eq!(Duration::from_secs(1800), backoff_config.max_interval);
+/// assert_eq!(Duration::from_millis(500), backoff_config.initial_interval);
+/// assert!(backoff_config.give_up_after.is_none());
+/// assert_eq!(1.5, backoff_config.multiplier);
+/// assert_eq!(0.5, backoff_config.randomization_factor);
+/// ```
 #[derive(Debug, Clone)]
 pub struct BackoffConfig {
     /// The starting backoff for the first error. For each subsequent error,
@@ -301,6 +318,9 @@ pub enum HandlerResult<V, E> {
 }
 
 impl<V, E> HandlerResult<V, E> {
+    /// returns `true` only if this result is one of the succesful variants.
+    /// This does not necessarily mean that `into_validated` will return `Some`,
+    /// since a successful finalization does not involve any validation.
     pub fn is_success(&self) -> bool {
         match self {
             HandlerResult::SyncSuccess(_) => true,
@@ -309,10 +329,14 @@ impl<V, E> HandlerResult<V, E> {
         }
     }
 
+    /// returns `true` if this result indicates some sort of error. If this returns
+    /// `true`, then `into_error` is guaranteed to return `Some`
     pub fn is_error(&self) -> bool {
         !self.is_success()
     }
 
+    /// Converts this result into an `Option` containing the error. If `is_error`
+    /// returns `true`, then this will be `Some`, otherwise it will be `None`.
     pub fn into_error(self) -> Option<E> {
         match self {
             HandlerResult::ValidationFailed(e) => Some(e),
@@ -322,6 +346,9 @@ impl<V, E> HandlerResult<V, E> {
         }
     }
 
+    /// Converts this result into an `Option` containing the validated type. This
+    /// will only return `Some` if the `validate` function was successful, which can
+    /// only happen for sync requests, not for finalization.
     pub fn into_validated(self) -> Option<V> {
         match self {
             HandlerResult::SyncFailed(v, _) => Some(v),
@@ -333,21 +360,46 @@ impl<V, E> HandlerResult<V, E> {
 
 /// An optional trait for creating handlers that want to recover from their own errors.
 /// This provides an opinionated base that should work well for most operators.
-/// Sync and finalize operations are broken down into separate steps, one for the action
-/// itself, and another for determining the status. If `sync_children` returns an `Err`
-/// then the error will be passed to `determine_status` so that it can be described in the
-/// status of the parent. Same goes for `finalize`. Like the base `Handler` trait, this trait
-/// provides a default implementation of `finalize` for common cases where no special finalization
-/// logic is required.
+/// Sync and finalize operations are each broken down into multiple separate functions.
+/// The `Handler::sync` function is separated out into three functions here, `validate`,
+/// `sync_children`, and `determine_status`. The `Handler::finalize` function uses `finalize`
+/// and `determine_status` (no validation for parents that are being deleted).
+///
+/// For sync handling:
+///
+/// 1. The request is first passed to the `validate` function
+/// 2. If validate returns Ok, then the value it returned is passed to `sync_children`. If `validate` returned an error, then `sync_children` is skipped.
+/// 3. The results from both `validate` and `sync_children` are passed to `determine_status`
+///
+/// For finalize handling:
+///
+/// 1. The request is passed to the `finalize` function. There is no validation, since the parent is being deleted
+/// 2. The result of `finalize` is passed to `determine_status`
+///
+/// Like the base `Handler` trait, this trait provides a default implementation of `finalize`
+/// for common cases where no special finalization logic is required.
 ///
 /// Unlike the base `Handler` trait, `FailableHandler` impls may use any error type they wish,
 /// even those that are not `Send` or `'static`.
-///
 pub trait FailableHandler: Send + Sync + 'static {
+    /// Type representing the result of successful validation. This can be any type you want,
+    /// but a good starting place is to simply make this a struct type that you deserialize the
+    /// request `parent` to.
     type Validated;
-    type Error: Debug;
-    type Status: serde::Serialize + serde::de::DeserializeOwned;
 
+    /// Error type that is common for all the functions in this trait. Errors here do _not_ need
+    /// to implement `Sync` or `Send`, as they do not need to be converted into a
+    /// `roperator::error::Error`.
+    type Error: Debug;
+
+    /// Type representing the status of your parent CRD. This can be any type that implements
+    /// `serde::Serialize`. This includes `serde_json::Value`, which is created by the `json!`
+    /// macro.
+    type Status: serde::Serialize;
+
+    /// Performs validation of the request. If this function returns an error, then
+    /// `sync_children` will be skipped for this request. If this returns `Ok`, then the
+    /// `Validated` type will be passed to `sync_children`.
     fn validate(&self, request: &SyncRequest) -> Result<Self::Validated, Self::Error>;
 
     /// Returns the list of desired children for this parent. This function will be called
@@ -361,7 +413,8 @@ pub trait FailableHandler: Send + Sync + 'static {
     ) -> Result<Vec<Value>, Self::Error>;
 
     /// Finalize this parent. The default implementation simply allows the deletion to proceed
-    /// as normal. If this returns an error, then the error will be passed to `determine_status`.
+    /// as normal. If this returns an error, then the error will be passed to `determine_status`
+    /// and deletion will _not_ be allowed to proceed.
     fn finalize(&self, _req: &SyncRequest) -> Result<(), Self::Error> {
         Ok(())
     }
