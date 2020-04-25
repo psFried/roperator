@@ -31,7 +31,7 @@ use crate::{
 
 use serde::Serialize;
 use serde_json::Value;
-use tokio::runtime::current_thread::{Runtime, TaskExecutor};
+use tokio::runtime::Runtime;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug, Display};
@@ -52,7 +52,7 @@ macro_rules! test_error {
 /// the operator when you call functions like `assert_resource_eq_eventually` and others. These functions accept timeout values and
 /// will automatically run the reconciliation loop of the operator intermittently as they wait for the desired condition.
 pub struct TestKit {
-    state: OperatorState<TaskExecutor>,
+    state: OperatorState,
     handler: HandlerRef,
     instrumented_handler: InstrumentedHandler,
     runtime: Runtime,
@@ -179,17 +179,22 @@ impl TestKit {
     ) -> Result<TestKit, Error> {
         let metrics = Metrics::new();
         let client = Client::new(client_config, metrics.client_metrics())?;
-        let mut runtime = Runtime::new()?;
         let namespace = operator_config.namespace.clone();
 
-        let state = runtime.block_on(async {
-            let executor = TaskExecutor::current();
+        let mut runtime = tokio::runtime::Builder::new()
+            .enable_all()
+            .basic_scheduler()
+            .build()?;
+
+        let executor = runtime.handle().clone();
+        let operator_client = client.clone();
+        let state = runtime.block_on(async move {
             create_operator_state(
                 executor,
                 metrics,
                 Arc::new(AtomicBool::new(true)),
                 operator_config,
-                client.clone(),
+                operator_client,
             )
             .await
         });
@@ -734,7 +739,7 @@ impl Handler for InstrumentedHandler {
 
 // TODO: add some sort of "required_quiet_period" parameter so that we can detect hot-loop scenarios
 async fn do_reconciliation_run(
-    state: &mut OperatorState<TaskExecutor>,
+    state: &mut OperatorState,
     parents_needing_sync: &mut HashSet<String>,
     handler: &HandlerRef,
     instrumented_handler: &InstrumentedHandler,
@@ -875,7 +880,7 @@ impl Display for MissingResource {
 impl std::error::Error for MissingResource {}
 
 async fn compare_resources(
-    state: &OperatorState<TaskExecutor>,
+    state: &OperatorState,
     k8s_type: &K8sType,
     id: &ObjectIdRef<'_>,
     expected: &Value,
@@ -885,7 +890,7 @@ async fn compare_resources(
 }
 
 async fn get_object(
-    state: &OperatorState<TaskExecutor>,
+    state: &OperatorState,
     k8s_type: &K8sType,
     id: &ObjectIdRef<'_>,
 ) -> Result<K8sResource, Error> {

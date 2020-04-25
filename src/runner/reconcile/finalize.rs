@@ -59,7 +59,7 @@ async fn get_finalize_result(
         return Ok(None);
     }
 
-    let (req, finalize_result) = tokio_executor::blocking::run(move || {
+    let (req, finalize_result) = tokio::task::spawn_blocking(move || {
         let start_time = Instant::now();
         let result = handler
             .finalize(&request)
@@ -73,7 +73,7 @@ async fn get_finalize_result(
         }
         (request, result)
     })
-    .await;
+    .await?;
     let FinalizeResponse { retry, status } = finalize_result?;
 
     let request: SyncRequest = req;
@@ -85,7 +85,7 @@ async fn get_finalize_result(
             parent_id
         );
         update_status_if_different(&request.parent, &client, runtime_config, status).await?;
-        tokio::timer::delay_for(delay).await;
+        tokio::time::delay_for(delay).await;
     } else {
         log::info!(
             "handler response indicates that parent: {} has been finalized",

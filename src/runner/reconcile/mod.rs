@@ -49,6 +49,7 @@ pub enum UpdateError {
     InvalidHandlerResponse(InvalidResourceError),
     UnknownChildType(String, String),
     HandlerError(Error),
+    TaskCancelled,
 }
 
 impl Display for UpdateError {
@@ -64,6 +65,17 @@ impl Display for UpdateError {
                 api_version, kind
             ),
             UpdateError::HandlerError(err) => write!(f, "Handler error: {}", err),
+            UpdateError::TaskCancelled => write!(f, "Task was cancelled"),
+        }
+    }
+}
+
+impl From<tokio::task::JoinError> for UpdateError {
+    fn from(err: tokio::task::JoinError) -> UpdateError {
+        if err.is_cancelled() {
+            UpdateError::TaskCancelled
+        } else {
+            UpdateError::HandlerError(crate::error::Error::from(HandlerPanic))
         }
     }
 }
@@ -77,6 +89,16 @@ impl From<client::Error> for UpdateError {
 impl From<InvalidResourceError> for UpdateError {
     fn from(err: InvalidResourceError) -> UpdateError {
         UpdateError::InvalidHandlerResponse(err)
+    }
+}
+
+#[derive(Debug)]
+struct HandlerPanic;
+impl std::error::Error for HandlerPanic {}
+
+impl Display for HandlerPanic {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("Handler paniced")
     }
 }
 

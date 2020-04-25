@@ -89,9 +89,9 @@ pub fn patch_request(
     patch: &Patch,
 ) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, id.namespace(), Some(id.name()));
-    let mut builder = make_req(url, Method::PATCH, client_config);
     let header_value = patch.merge_strategy.content_type();
-    builder.header(header::CONTENT_TYPE, header_value);
+    let builder =
+        make_req(url, Method::PATCH, client_config).header(header::CONTENT_TYPE, header_value);
     let body = serde_json::to_vec(&patch.value)?;
     let req = builder.body(Body::from(body)).unwrap();
     Ok(req)
@@ -118,7 +118,7 @@ pub fn create_request(
 ) -> Result<Request<Body>, Error> {
     let url = make_url(client_config, k8s_type, get_namespace(resource), None);
 
-    let mut builder = make_req(url, Method::POST, client_config);
+    let builder = make_req(url, Method::POST, client_config);
     let as_vec = serde_json::to_vec(resource)?;
     let req = builder.body(Body::from(as_vec)).unwrap();
     Ok(req)
@@ -220,17 +220,17 @@ fn make_req(
     method: http::Method,
     client_config: &ClientConfig,
 ) -> http::request::Builder {
-    let mut builder = Request::builder();
-    builder
+    let builder = Request::builder()
         .method(method)
         .uri(url.into_string())
         .header(header::ACCEPT, "application/json")
         .header(header::USER_AGENT, client_config.user_agent.as_str());
 
     if let Credentials::Header(ref value) = client_config.credentials {
-        builder.header(header::AUTHORIZATION, value);
+        builder.header(header::AUTHORIZATION, value)
+    } else {
+        builder
     }
-    builder
 }
 
 fn get_namespace(resource: &Value) -> Option<&str> {

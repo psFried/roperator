@@ -5,7 +5,7 @@ use crate::k8s_types::K8sType;
 use crate::resource::ObjectIdRef;
 use crate::runner::metrics::ClientMetrics;
 
-use futures_util::TryStreamExt;
+use bytes::buf::ext::BufExt;
 use http::{Request, Response};
 use hyper::client::Client as HyperClient;
 use hyper::client::HttpConnector;
@@ -18,6 +18,7 @@ use openssl::x509::X509;
 use regex::bytes::Regex;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use tokio::stream::StreamExt;
 
 use std::fs::File;
 use std::io;
@@ -303,8 +304,8 @@ impl Client {
             Ok(())
         } else {
             let status = response.status();
-            let body = response.into_body().try_concat().await?;
-            if let Ok(as_str) = std::str::from_utf8(&body) {
+            let body = hyper::body::to_bytes(response.into_body()).await?;
+            if let Ok(as_str) = std::str::from_utf8(body.as_ref()) {
                 log::error!("Response status: {}, body: {}", status, as_str);
             } else {
                 log::error!(
@@ -408,13 +409,19 @@ impl Client {
         if !response.status().is_success() {
             return Err(Error::http(response.status()));
         }
-        let body = response.into_body().try_concat().await?;
 
-        if log::log_enabled!(log::Level::Trace) {
-            let as_str = String::from_utf8_lossy(&body);
+        let deserialized = if log::log_enabled!(log::Level::Trace) {
+            // if we're logging the response body, then we'll need to read it all into a
+            // single buffer, since we can't read a response body twice without copying
+            let body = hyper::body::to_bytes(response.into_body()).await?;
+            let as_str = String::from_utf8_lossy(body.as_ref());
             log::trace!("Got response body: {}", as_str);
-        }
-        let deserialized = serde_json::from_slice(&body)?;
+            serde_json::from_slice(body.as_ref())?
+        } else {
+            // in the common case, we'll just parse the response body directly
+            let body = hyper::body::aggregate(response.into_body()).await?;
+            serde_json::from_reader(body.reader())?
+        };
         Ok(deserialized)
     }
 }
@@ -462,7 +469,7 @@ impl Lines {
                 // fine then, we'll try to read some more from the body
                 let next = self.body.next().await;
                 match next {
-                    Some(Ok(bytes)) => self.remaining = Some(bytes.into_bytes()),
+                    Some(Ok(bytes)) => self.remaining = Some(bytes),
                     Some(Err(e)) => {
                         log::error!("Error reading response lines: {}", e);
                         return Some(Err(e.into()));
@@ -600,22 +607,25 @@ pub struct ObjectList<T> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use bytes::Bytes;
+    use futures_util::StreamExt;
     use hyper::Body;
-    use std::collections::VecDeque;
     use std::io::Read;
-    use tokio::runtime::current_thread::Runtime;
+    use tokio::runtime;
 
     #[test]
     fn lines_iterates_lines() {
         let input1 = &b"line1\nline2\r\nline3\r\n\r\n\r\n\rlong"[..];
         let input2 = &b"line4\r\r"[..];
         let input3 = &b"\r\nline5"[..];
-        let stream: VecDeque<Result<&[u8], String>> =
-            VecDeque::from(vec![Ok(input1), Ok(input2), Ok(input3)]);
+        let stream = tokio::stream::iter(vec![input1, input2, input3]).map(|b| {
+            let res: Result<Bytes, std::io::Error> = Ok(Bytes::from_static(b));
+            res
+        });
         let body = Body::wrap_stream(stream);
         let mut lines = Lines::from_body(body);
 
-        let mut runtime = Runtime::new().unwrap();
+        let mut runtime = runtime::Builder::new().basic_scheduler().build().unwrap();
 
         let expected = ["line1", "line2", "line3", "longline4", "line5"];
 
