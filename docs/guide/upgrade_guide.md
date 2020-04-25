@@ -6,14 +6,14 @@ Once Roperator version 1.0 is released, it will strictly adhere to semantic vers
 
 There were a number of breaking changes in the 0.2.0 release. Most of them were in the `roperator::request` module, and were made in order to provide a nicer API for retrieving child resources from the `SyncRequest`.
 
-`SyncRequest`:
+#### `SyncRequest`:
 
 - Removed `iter_children_with_type` function. Instead you can use `request.children().with_type(api_version, kind;
 - Removed `raw_child` function. Instead, use `request.children().of_type(k8s_type).get(namespace, name)`
 - Removed `has_child` function. Instead use `request.children().of_type(k8s_type).exists(namespace, name)`
 - Removed `deserialize_child` function. Instead use `request.children().with_type::<StructType>(k8s_type).get(namespace, name)`, where `StructType` is the type that you want to deserialize to
 
-`RequestChildren`:
+#### `RequestChildren`:
 
 - Refactored the functions that return typed views
     - `of_type` returns a `RawView` and `with_type` returns a `TypedView`
@@ -22,13 +22,13 @@ There were a number of breaking changes in the 0.2.0 release. Most of them were 
     - both functions accept any value that implements `Into<K8sTypeRef>`, which includes `&K8sType` and `(&str, &str)`
 - Removed the `exists` function. Use `of_type(k8s_type).exists(namespace, name)` instead
 
-`TypedView`:
+#### `TypedView`:
 
 - Changed the signatures of `get` and `exists` functions to accept `impl Into<ObjectIdRef<'a>>` instead of separate `namespace` and `name` arguments. Now you can pass `&ObjectId`, `ObjectIdRef`, or `(&str, &str)`
 - Removed the `iter_raw` function. Use `as_raw().iter()` instead
 - Changed the struct declaration to specify separate lifetimes for the inner `SyncRequest` and the `K8sTypeRef`. This should not impact most usages, but may if you're written out the full type on a variable
 
-`RawView`:
+#### `RawView`:
 
 - Changed the signatures of `get` and `exists` functions to accept `impl Into<ObjectIdRef<'a>>` instead of separate `namespace` and `name` arguments. Now you can pass `&ObjectId`, `ObjectIdRef`, or `(&str, &str)`
 - Changed the struct declaration to specify separate lifetimes for the inner `SyncRequest` and the `K8sTypeRef`. This should not impact most usages, but may if you're written out the full type on a variable
@@ -39,3 +39,8 @@ There were also a number of breaking changes in the `roperator::resource` module
 - `roperator::resource::type_ref` function was removed. Use the `get_type_ref` function from the `ResourceJson` trait instead.
 - `roperator::resource::str_value` function was removed. Use `Value::pointer(&str).and_then(Value::as_str)` instead.
 
+#### The `tokio` depencency:
+
+The tokio dependency has been updated to version `0.2`, which has a number of nice, but breaking,
+changes. Most users will likely not be affected by this, but it does impact users who rely on the
+function [`roperator::runner::start_operator_with_runtime`](https://docs.rs/roperator/0.1.5/roperator/runner/fn.start_operator_with_runtime.html).
