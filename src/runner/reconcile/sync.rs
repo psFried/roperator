@@ -76,7 +76,7 @@ async fn private_handle_sync(
         Ok(Some(Duration::from_secs(0)))
     } else {
         let (request, result) = {
-            tokio_executor::blocking::run(move || {
+            tokio::task::spawn_blocking(move || {
                 let result = handler.sync(&request);
                 log::debug!(
                     "finished invoking handler for parent: {} in {}ms",
@@ -85,7 +85,7 @@ async fn private_handle_sync(
                 );
                 (request, result)
             })
-            .await
+            .await?
         };
         let response = result.map_err(|err| UpdateError::HandlerError(err))?;
         let resync = response.resync;

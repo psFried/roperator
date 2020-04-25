@@ -24,9 +24,7 @@ use backoff::{backoff::Backoff, ExponentialBackoff};
 use client::Client;
 use metrics::Metrics;
 
-use tokio::executor::Executor;
-use tokio::prelude::*;
-use tokio::runtime::{Runtime, TaskExecutor};
+use tokio::runtime::{self, Runtime};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use std::collections::{HashMap, HashSet};
@@ -93,17 +91,17 @@ pub fn run_operator_with_client_config(
         Ok(c) => c,
         Err(err) => return err.into(),
     };
-    let runtime = match Runtime::new() {
+    let mut runtime = match Runtime::new() {
         Ok(rt) => rt,
         Err(err) => return err.into(),
     };
     let running = Arc::new(AtomicBool::new(true));
-    let executor = runtime.executor();
+    let executor = runtime.handle().clone();
     runtime.block_on(async move {
         run_with_client(executor, metrics, running, config, client, handler).await;
     });
     log::warn!("Operator stopped, shutting down runtime");
-    runtime.shutdown_now();
+    runtime.shutdown_timeout(Duration::from_secs(30));
     // return an error here, since the operator will never exit under normal circumstances
     Box::new(UnexpectedShutdownError)
 }
@@ -124,7 +122,7 @@ pub fn start_operator_with_runtime(
     let handle = OperatorHandle {
         running: running.clone(),
     };
-    let executor = runtime.executor();
+    let executor = runtime.handle().clone();
     runtime.spawn(async move {
         run_with_client(executor, metrics, running.clone(), config, client, handler).await;
     });
@@ -166,7 +164,7 @@ impl RuntimeConfig {
 }
 
 async fn run_with_client(
-    executor: TaskExecutor,
+    executor: runtime::Handle,
     metrics: Metrics,
     running: Arc<AtomicBool>,
     config: OperatorConfig,
@@ -193,13 +191,13 @@ async fn run_with_client(
     }
 }
 
-async fn create_operator_state<T: Executor>(
-    mut executor: T,
+async fn create_operator_state(
+    executor: runtime::Handle,
     metrics: Metrics,
     running: Arc<AtomicBool>,
     config: OperatorConfig,
     client: Client,
-) -> OperatorState<T> {
+) -> OperatorState {
     let OperatorConfig {
         parent,
         child_types,
@@ -215,7 +213,7 @@ async fn create_operator_state<T: Executor>(
 
     let parent_metrics = metrics.watcher_metrics(parent);
     let parent_monitor = informer::start_parent_monitor(
-        &mut executor,
+        executor.clone(),
         namespace.clone(),
         parent,
         client.clone(),
@@ -234,7 +232,7 @@ async fn create_operator_state<T: Executor>(
         };
         child_runtime_config.insert(child_type, runtime_conf);
         let child_monitor = informer::start_child_monitor(
-            &mut executor,
+            executor.clone(),
             tracking_label_name.clone(),
             namespace.clone(),
             child_type,
@@ -384,7 +382,7 @@ impl ParentState {
 }
 
 #[derive(Debug)]
-struct OperatorState<T: Executor> {
+struct OperatorState {
     running: Arc<AtomicBool>,
     parents: ResourceMonitor<UidToIdIndex>,
     children: HashMap<&'static K8sType, ResourceMonitor<LabelToIdIndex>>,
@@ -393,10 +391,10 @@ struct OperatorState<T: Executor> {
     parent_states: HashMap<String, ParentState>,
     client: Client,
     runtime_config: Arc<RuntimeConfig>,
-    executor: T,
+    executor: runtime::Handle,
 }
 
-impl<T: Executor> OperatorState<T> {
+impl OperatorState {
     async fn run(&mut self, handler: HandlerRef) {
         let mut parent_ids_to_sync = HashSet::with_capacity(16);
         while self.running.load(Ordering::Relaxed) {
@@ -676,31 +674,29 @@ impl<T: Executor> OperatorState<T> {
         let resource_type = self.runtime_config.parent_type;
         let index_key = Some(uid.to_owned());
 
-        self.executor
-            .spawn(Box::pin(async move {
-                tokio::timer::delay_for(duration).await;
-                log::trace!(
-                    "sending resync message for parent: {} with sync_counter: {}",
-                    parent_id,
-                    sync_counter
-                );
-                let message = ResourceMessage {
-                    event_type: EventType::TriggerResync {
-                        resync_round: sync_counter,
-                    },
-                    resource_type,
-                    resource_id: parent_id,
-                    index_key,
-                };
-                if sender.send(message).await.is_err() {
-                    log::warn!("Unable to send resync message");
-                }
-            }))
-            .expect("fatal error: failed to spawn a task to schedule a resync");
+        self.executor.spawn(Box::pin(async move {
+            tokio::time::delay_for(duration).await;
+            log::trace!(
+                "sending resync message for parent: {} with sync_counter: {}",
+                parent_id,
+                sync_counter
+            );
+            let message = ResourceMessage {
+                event_type: EventType::TriggerResync {
+                    resync_round: sync_counter,
+                },
+                resource_type,
+                resource_id: parent_id,
+                index_key,
+            };
+            if sender.send(message).await.is_err() {
+                log::warn!("Unable to send resync message");
+            }
+        }));
     }
 
     async fn recv_next(&mut self, timeout: Duration) -> Option<ResourceMessage> {
-        match self.receiver.recv().timeout(timeout).await {
+        match tokio::time::timeout(timeout, self.receiver.recv()).await {
             Err(_) => None,
             Ok(Some(val)) => Some(val),
             Ok(None) => {

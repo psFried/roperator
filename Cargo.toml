@@ -16,14 +16,13 @@ exclude = [ "docs/" ]
 status = "actively-developed"
 
 [dependencies]
-hyper = { version = "=0.13.0-alpha.4", features = ["unstable-stream"]}
-http = "^0.1.15"
-tokio = "0.2.0-alpha.6"
-tokio-executor = "0.2.0-alpha.6"
-futures-preview = { version = "=0.3.0-alpha.19", features = ["compat"] }
-futures-util-preview = "=0.3.0-alpha.19"
-bytes = "0.4.12"
-hyper-openssl = "=0.8.0-alpha.4"
+hyper = { version = "0.13.5", features = ["stream"]}
+http = "0.2"
+tokio = { version = "0.2", features = [ "rt-core", "rt-threaded", "io-driver", "io-util", "time", "tcp", "stream", "blocking"] }
+futures = { version = "0.3", features = ["compat"] }
+futures-util = "0.3"
+bytes = "0.5"
+hyper-openssl = "0.8.0"
 openssl = "^0.10"
 serde_json = "1.0"
 serde_yaml = "0.8"

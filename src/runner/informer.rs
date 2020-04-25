@@ -10,7 +10,7 @@ use crate::runner::metrics::WatcherMetrics;
 use crate::runner::resource_map::{IdSet, ResourceMap};
 
 use serde_json::Value;
-use tokio::executor::Executor;
+use tokio::runtime::Handle;
 use tokio::sync::mpsc::{error::SendError, Sender};
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -334,14 +334,14 @@ impl From<ClientError> for MonitorBackendErr {
     }
 }
 
-impl From<SendError> for MonitorBackendErr {
-    fn from(_: SendError) -> MonitorBackendErr {
+impl<T> From<SendError<T>> for MonitorBackendErr {
+    fn from(_: SendError<T>) -> MonitorBackendErr {
         MonitorBackendErr::SendErr
     }
 }
 
 pub fn start_child_monitor(
-    executor: &mut impl Executor,
+    executor: Handle,
     label_name: String,
     namespace: Option<String>,
     k8s_type: &'static K8sType,
@@ -363,7 +363,7 @@ pub fn start_child_monitor(
 }
 
 pub fn start_parent_monitor(
-    executor: &mut impl Executor,
+    executor: Handle,
     namespace: Option<String>,
     k8s_type: &'static K8sType,
     client: Client,
@@ -384,7 +384,7 @@ pub fn start_parent_monitor(
 
 #[allow(clippy::too_many_arguments)]
 fn start_monitor<I: ReverseIndex>(
-    executor: &mut impl Executor,
+    executor: Handle,
     index: I,
     k8s_type: &'static K8sType,
     namespace: Option<String>,
@@ -407,11 +407,9 @@ fn start_monitor<I: ReverseIndex>(
         label_selector,
         namespace,
     };
-    executor
-        .spawn(Box::pin(async move {
-            backend.run().await;
-        }))
-        .expect("Failed to spawn watcher task");
+    executor.spawn(Box::pin(async move {
+        backend.run().await;
+    }));
     frontend
 }
 
@@ -474,8 +472,8 @@ impl<I: ReverseIndex> ResourceMonitorBackend<I> {
 
         if !is_http_410 {
             self.metrics.error();
-            let when = tokio::clock::now() + std::time::Duration::from_secs(10);
-            tokio::timer::delay(when).await;
+            let duration = std::time::Duration::from_secs(10);
+            tokio::time::delay_for(duration).await;
         }
         // if it's a send error, then we'll return false so that we can stop the loop
         !is_send_err

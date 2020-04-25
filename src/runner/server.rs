@@ -3,13 +3,13 @@ use crate::runner::RuntimeConfig;
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response};
-use tokio::runtime::TaskExecutor;
+use tokio::runtime::Handle;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 pub(crate) async fn start(
-    executor: TaskExecutor,
+    _executor: Handle,
     port: u16,
     runtime_config: Arc<RuntimeConfig>,
     serve_metrics: bool,
@@ -33,11 +33,7 @@ pub(crate) async fn start(
             }))
         }
     });
-    if let Err(err) = Server::bind(&address)
-        .executor(executor)
-        .serve(service)
-        .await
-    {
+    if let Err(err) = Server::bind(&address).serve(service).await {
         log::error!("Server failed with error: {:?}", err);
     }
 }
