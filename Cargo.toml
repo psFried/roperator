@@ -15,6 +15,9 @@ exclude = [ "docs/" ]
 [badges.maintenance]
 status = "actively-developed"
 
+[package.metadata.docs.rs]
+features = [ "failable", "testkit" ]
+
 [dependencies]
 hyper = { version = "0.13.5", features = ["stream"]}
 http = "0.2"
