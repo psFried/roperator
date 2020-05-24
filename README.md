@@ -64,7 +64,7 @@ fn main() {
 
 ### Handler
 
-The main logic of your operator is inside your `Handler` implementation. The main function you need to implement is `Handler::sync`, which accepts a `SyncRequest` and returns a `SyncResponse`. The `Hander` trait is implemented automatically for all `Fn(&SyncRequest) -> Result<SyncResponse, Error>`, but you can also implement it for your own type.
+The main logic of your operator is inside your `Handler` implementation. The main function you need to implement is `Handler::sync`, which accepts a `SyncRequest` and returns a `SyncResponse`. The `Handler` trait is implemented automatically for all `Fn(&SyncRequest) -> Result<SyncResponse, Error>`, but you can also implement it for your own type.
 
 ```rust
 use roperator::prelude::{Handler, SyncRequest, SyncResponse, FinalizeResponse, Error};
