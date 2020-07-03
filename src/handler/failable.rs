@@ -168,7 +168,7 @@ impl BackoffConfig {
 /// ```rust
 /// use roperator::handler::{Handler, SyncRequest, SyncResponse};
 /// use roperator::handler::failable::ErrorBackoff;
-/// use roperator::error::Error;
+/// use anyhow::Error;
 /// use std::io;
 ///
 /// # let request = &roperator::handler::request::test_request();
@@ -392,7 +392,7 @@ pub trait FailableHandler: Send + Sync + 'static {
 
     /// Error type that is common for all the functions in this trait. Errors here do _not_ need
     /// to implement `Sync` or `Send`, as they do not need to be converted into a
-    /// `roperator::error::Error`.
+    /// `anyhow::Error`.
     type Error: Debug;
 
     /// Type representing the status of your parent CRD. This can be any type that implements
@@ -475,7 +475,7 @@ where
 /// ```rust,no_run
 /// use roperator::handler::SyncRequest;
 /// use roperator::handler::failable::DefaultFailableHandler;
-/// use roperator::error::Error;
+/// use anyhow::Error;
 /// use serde::{Serialize, Deserialize};
 /// use std::time::Duration;
 /// use serde_json::{json, Value};

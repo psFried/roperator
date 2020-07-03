@@ -140,7 +140,7 @@ fn operator_continuously_retries_sync_of_parent_when_handler_returns_error() {
         .expect("reconciliation succeeded but should have returned error");
     println!("Got error: {:?}", err);
     let handler_errors = err
-        .as_type::<HandlerErrors>()
+        .downcast_ref::<HandlerErrors>()
         .expect("Expected HandlerErrors but got another type");
     let error_count = handler_errors.get_sync_error_count_for_parent(&error_id);
     assert!(error_count > 0);
@@ -442,7 +442,7 @@ impl<T: Handler> Handler for ReturnErrorHandler<T> {
             let index = self
                 .counter
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Err(Box::new(MockHandlerError(index)))
+            Err(Error::new(MockHandlerError(index)))
         } else {
             self.delegate.sync(req)
         }

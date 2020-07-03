@@ -12,7 +12,6 @@ pub mod testkit;
 use crate::resource::ObjectIdRef;
 
 use crate::config::{ClientConfig, OperatorConfig, UpdateStrategy};
-use crate::error::Error;
 use crate::handler::{Handler, SyncRequest};
 use crate::k8s_types::K8sType;
 use crate::resource::{K8sResource, K8sTypeRef, ObjectId};
@@ -20,6 +19,7 @@ use crate::runner::informer::{
     EventType, LabelToIdIndex, ResourceMessage, ResourceMonitor, UidToIdIndex,
 };
 use crate::runner::reconcile::SyncHandler;
+use anyhow::Error;
 use backoff::{backoff::Backoff, ExponentialBackoff};
 use client::Client;
 use metrics::Metrics;
@@ -103,7 +103,7 @@ pub fn run_operator_with_client_config(
     log::warn!("Operator stopped, shutting down runtime");
     runtime.shutdown_timeout(Duration::from_secs(30));
     // return an error here, since the operator will never exit under normal circumstances
-    Box::new(UnexpectedShutdownError)
+    Error::new(UnexpectedShutdownError)
 }
 
 /// Starts the operator asynchronously using the provided runtime. This function will return immediately with a
