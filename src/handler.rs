@@ -16,7 +16,7 @@ pub mod request;
 #[cfg(not(feature = "test"))]
 mod request;
 
-use crate::error::Error;
+use anyhow::Error;
 use serde::Serialize;
 use serde_json::Value;
 use std::fmt::{self, Debug};

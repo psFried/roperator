@@ -63,7 +63,7 @@ async fn get_finalize_result(
         let start_time = Instant::now();
         let result = handler
             .finalize(&request)
-            .map_err(|e| UpdateError::HandlerError(e));
+            .map_err(UpdateError::HandlerError);
         {
             log::debug!(
                 "finished invoking handler for parent: {} in {}ms",

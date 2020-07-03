@@ -1,6 +1,6 @@
-use crate::error::Error;
 use crate::k8s_types::K8sType;
 use crate::resource::{InvalidResourceError, K8sResource, ObjectId};
+use anyhow::Error;
 
 #[cfg(feature = "testkit")]
 use crate::resource::ObjectIdRef;
@@ -290,7 +290,7 @@ impl std::error::Error for MonitorBackendErr {
 
 impl MonitorBackendErr {
     fn into_boxed_error(self) -> Error {
-        Box::new(self)
+        Error::new(self)
     }
 
     fn is_resource_version_expired(&self) -> bool {

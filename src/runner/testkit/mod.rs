@@ -19,7 +19,6 @@
 //! for integration tests.
 use crate::{
     config::{ClientConfig, OperatorConfig},
-    error::Error,
     handler::{FinalizeResponse, Handler, SyncRequest, SyncResponse},
     k8s_types::K8sType,
     resource::{K8sResource, ObjectId, ObjectIdRef},
@@ -29,6 +28,7 @@ use crate::{
     },
 };
 
+use anyhow::Error;
 use serde::Serialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
@@ -41,7 +41,7 @@ use std::time::{Duration, Instant};
 
 macro_rules! test_error {
     ($message:tt) => {{
-        Box::new(TestKitError(format!($message))) as Error
+        Error::new(TestKitError(format!($message)))
     }};
 }
 

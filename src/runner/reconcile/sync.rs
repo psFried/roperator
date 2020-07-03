@@ -87,7 +87,7 @@ async fn private_handle_sync(
             })
             .await?
         };
-        let response = result.map_err(|err| UpdateError::HandlerError(err))?;
+        let response = result.map_err(UpdateError::HandlerError)?;
         let resync = response.resync;
         update_all(request, response, client, runtime_config).await?;
         Ok(resync)

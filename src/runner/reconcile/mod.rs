@@ -2,12 +2,12 @@ pub(crate) mod compare;
 mod finalize;
 mod sync;
 
-use crate::error::Error;
 use crate::handler::{Handler, SyncRequest};
 use crate::resource::{InvalidResourceError, K8sResource};
 use crate::runner::client::{self, Client};
 use crate::runner::informer::ResourceMessage;
 use crate::runner::RuntimeConfig;
+use anyhow::Error;
 
 use serde_json::Value;
 use tokio::sync::mpsc::Sender;
@@ -75,7 +75,7 @@ impl From<tokio::task::JoinError> for UpdateError {
         if err.is_cancelled() {
             UpdateError::TaskCancelled
         } else {
-            UpdateError::HandlerError(crate::error::Error::from(HandlerPanic))
+            UpdateError::HandlerError(anyhow::Error::from(HandlerPanic))
         }
     }
 }
