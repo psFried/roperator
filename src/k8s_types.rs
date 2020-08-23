@@ -248,8 +248,10 @@ pub mod authorization_k8s_io {
 def_types! {
     batch => [
         v1 => [
-            CronJob ~ cronjobs,
             Job ~ jobs
+        ],
+        v1beta1 => [
+            CronJob ~ cronjobs
         ]
     ]
 }
