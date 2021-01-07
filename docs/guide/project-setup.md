@@ -57,7 +57,7 @@ env_logger = "0.7"
 
 # This is only needed if you intend to use the builtin testkit for testing your operator, which is probably a good idea
 [dev-dependencies]
-roperator = { version = "*", features = "testkit" }
+roperator = { version = "*", features = ["testkit"] }
 ```
 
 # Next
