@@ -13,11 +13,10 @@ jobs:
         with:
           toolchain: 1.39.0
           override: true
-      - uses: engineerd/setup-kind@v0.1.0
+      - uses: engineerd/setup-kind@v0.5.0
       - uses: actions-rs/cargo@v1
       - name: RunTests
         run: |
-          export KUBECONFIG="$(kind get kubeconfig-path)"
           kubectl cluster-info
           kubectl apply -f tests/resources/
           cargo test --all-features
