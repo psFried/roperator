@@ -19,7 +19,7 @@ status = "actively-developed"
 features = [ "failable", "testkit" ]
 
 [dependencies]
-hyper = { version = "0.14", features = ["client", "server", "http1", "stream"]}
+hyper = { version = "0.14", features = ["client", "server", "http1", "http2", "stream"]}
 http = "0.2"
 tokio = { version = "1", features = [ "rt", "rt-multi-thread", "io-util", "time", "net"] }
 tokio-stream = { version = "0.1.5", features = ["net"] }
