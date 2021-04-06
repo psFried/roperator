@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) async fn handle_sync(handler: SyncHandler) {
     let SyncHandler {
-        mut sender,
+        sender,
         request,
         handler,
         client,

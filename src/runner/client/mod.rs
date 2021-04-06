@@ -5,7 +5,7 @@ use crate::k8s_types::K8sType;
 use crate::resource::ObjectIdRef;
 use crate::runner::metrics::ClientMetrics;
 
-use bytes::buf::ext::BufExt;
+use bytes::Buf;
 use http::{Request, Response};
 use hyper::client::Client as HyperClient;
 use hyper::client::HttpConnector;
@@ -18,7 +18,7 @@ use openssl::x509::X509;
 use regex::bytes::Regex;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use tokio::stream::StreamExt;
+use tokio_stream::StreamExt;
 
 use std::fs::File;
 use std::io;
@@ -34,7 +34,7 @@ lazy_static! {
 
 #[derive(Debug)]
 pub enum Error {
-    Io(hyper::error::Error),
+    Io(hyper::Error),
     Serde(serde_json::Error),
     Http(http::StatusCode),
 }
@@ -76,8 +76,8 @@ impl std::fmt::Display for Error {
     }
 }
 
-impl From<hyper::error::Error> for Error {
-    fn from(e: hyper::error::Error) -> Error {
+impl From<hyper::Error> for Error {
+    fn from(e: hyper::Error) -> Error {
         Error::Io(e)
     }
 }
@@ -618,14 +618,14 @@ mod test {
         let input1 = &b"line1\nline2\r\nline3\r\n\r\n\r\n\rlong"[..];
         let input2 = &b"line4\r\r"[..];
         let input3 = &b"\r\nline5"[..];
-        let stream = tokio::stream::iter(vec![input1, input2, input3]).map(|b| {
+        let stream = tokio_stream::iter(vec![input1, input2, input3]).map(|b| {
             let res: Result<Bytes, std::io::Error> = Ok(Bytes::from_static(b));
             res
         });
         let body = Body::wrap_stream(stream);
         let mut lines = Lines::from_body(body);
 
-        let mut runtime = runtime::Builder::new().basic_scheduler().build().unwrap();
+        let runtime = runtime::Builder::new_current_thread().build().unwrap();
 
         let expected = ["line1", "line2", "line3", "longline4", "line5"];
 

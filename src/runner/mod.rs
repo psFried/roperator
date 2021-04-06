@@ -91,7 +91,7 @@ pub fn run_operator_with_client_config(
         Ok(c) => c,
         Err(err) => return err.into(),
     };
-    let mut runtime = match Runtime::new() {
+    let runtime = match Runtime::new() {
         Ok(rt) => rt,
         Err(err) => return err.into(),
     };
@@ -664,7 +664,7 @@ impl OperatorState {
         duration: Duration,
         sync_counter: u32,
     ) {
-        let mut sender = self.sender.clone();
+        let sender = self.sender.clone();
         log::trace!(
             "scheduling resync for parent: {} with sync_counter: {} for {}ms in the future",
             parent_id,
@@ -675,7 +675,7 @@ impl OperatorState {
         let index_key = Some(uid.to_owned());
 
         self.executor.spawn(Box::pin(async move {
-            tokio::time::delay_for(duration).await;
+            tokio::time::sleep(duration).await;
             log::trace!(
                 "sending resync message for parent: {} with sync_counter: {}",
                 parent_id,
