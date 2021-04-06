@@ -21,7 +21,7 @@ The master branch includes work for the upcoming 0.2.0 release. This includes a 
 
 ### Dependencies
 
-- Rust 1.39 or later
+- Rust 1.46 or later
 - Openssl libraries and headers. Roperator uses the rust `openssl` crate. You can check out their docs on building and linking to openssl [here](https://docs.rs/openssl/0.10.26/openssl/index.html#building)
 
 ## Getting Started
