@@ -767,7 +767,7 @@ async fn do_reconciliation_run(
             last_invocation_count = current_invocation_count;
             timeout = max_timeout
                 .checked_sub(start.elapsed())
-                .unwrap_or(Duration::from_secs(0));
+                .unwrap_or_else(|| Duration::from_secs(0));
         } else {
             return Ok(());
         }

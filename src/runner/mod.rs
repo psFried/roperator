@@ -577,7 +577,7 @@ impl OperatorState {
             } else {
                 max_timeout
                     .checked_sub(start_time.elapsed())
-                    .unwrap_or(Duration::from_millis(1))
+                    .unwrap_or_else(|| Duration::from_millis(1))
                     .min(Duration::from_millis(500)) // clamp to 500ms since we've already started receiving
                     .min(max_timeout) // clamp to max_timeout just in case that value was already very short
             };

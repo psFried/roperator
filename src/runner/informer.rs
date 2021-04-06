@@ -519,9 +519,9 @@ impl<I: ReverseIndex> ResourceMonitorBackend<I> {
             .client
             .watch(
                 &*self.k8s_type,
-                self.namespace.as_ref().map(String::as_str),
+                self.namespace.as_deref(),
                 Some(resource_version),
-                self.label_selector.as_ref().map(String::as_str),
+                self.label_selector.as_deref(),
             )
             .await?;
 
@@ -599,8 +599,8 @@ impl<I: ReverseIndex> ResourceMonitorBackend<I> {
             .client
             .list_all(
                 &*self.k8s_type,
-                self.namespace.as_ref().map(String::as_str),
-                self.label_selector.as_ref().map(String::as_str),
+                self.namespace.as_deref(),
+                self.label_selector.as_deref(),
             )
             .await?;
         // safe unwrap since RawApi can only fail when setting the request body, but it's hard coded to an empty veec

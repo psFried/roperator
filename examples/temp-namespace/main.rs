@@ -48,7 +48,7 @@ impl TempNamespace {
         let elapsed = Utc::now()
             .signed_duration_since(created_at)
             .to_std()
-            .unwrap_or(Duration::from_secs(0));
+            .unwrap_or_else(|| Duration::from_secs(0));
         if self.spec.delete_after > elapsed {
             Some(self.spec.delete_after - elapsed)
         } else {
