@@ -181,7 +181,9 @@ impl TestKit {
         let client = Client::new(client_config, metrics.client_metrics())?;
         let namespace = operator_config.namespace.clone();
 
-        let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
 
         let executor = runtime.handle().clone();
         let operator_client = client.clone();
