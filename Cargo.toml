@@ -19,13 +19,14 @@ status = "actively-developed"
 features = [ "failable", "testkit" ]
 
 [dependencies]
-hyper = { version = "0.13.5", features = ["stream"]}
+hyper = { version = "0.14", features = ["client", "server", "http1", "stream"]}
 http = "0.2"
-tokio = { version = "0.2", features = [ "rt-core", "rt-threaded", "io-driver", "io-util", "time", "tcp", "stream", "blocking"] }
+tokio = { version = "1", features = [ "rt", "rt-multi-thread", "io-util", "time", "net"] }
+tokio-stream = { version = "0.1.5", features = ["net"] }
 futures = { version = "0.3", features = ["compat"] }
 futures-util = "0.3"
-bytes = "0.5"
-hyper-openssl = "0.8.0"
+bytes = "1"
+hyper-openssl = "0.9"
 openssl = "^0.10"
 serde_json = "1.0"
 serde_yaml = "0.8"

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) async fn handle_finalize(handler: SyncHandler) {
     let SyncHandler {
-        mut sender,
+        sender,
         request,
         handler,
         client,
@@ -85,7 +85,7 @@ async fn get_finalize_result(
             parent_id
         );
         update_status_if_different(&request.parent, &client, runtime_config, status).await?;
-        tokio::time::delay_for(delay).await;
+        tokio::time::sleep(delay).await;
     } else {
         log::info!(
             "handler response indicates that parent: {} has been finalized",

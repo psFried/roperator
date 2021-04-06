@@ -473,7 +473,7 @@ impl<I: ReverseIndex> ResourceMonitorBackend<I> {
         if !is_http_410 {
             self.metrics.error();
             let duration = std::time::Duration::from_secs(10);
-            tokio::time::delay_for(duration).await;
+            tokio::time::sleep(duration).await;
         }
         // if it's a send error, then we'll return false so that we can stop the loop
         !is_send_err
