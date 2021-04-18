@@ -62,7 +62,7 @@ others who are interested in learning.
 
 The continuous integration checks are run on each PR. Here's how to run them locally:
 
-- `cargo test` : will run ONLY the unit tests (not the integration tests)
+- `cargo test --features test` : will run ONLY the unit tests (not the integration tests)
 - `cargo test --features 'testkit test'` will run all the tests, including integration tests. You'll need to have a few prerequisites:
     - Have a kubernetes cluster running. We use [kind](https://kind.sigs.k8s.io/) in the CI environment, but just about any local or remote cluster will work, as long as it's a test cluster. Don't run these tests on a production cluster, or any cluster that you feel attached to.
     - Ensure that you have a kubeconfig file that has the current context set to the cluster you want to use. You can set the `KUBECONFIG` environment variable if you don't want to use the default one in your home directory.

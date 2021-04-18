@@ -365,14 +365,11 @@ impl KubeConfig {
                     .certificate_authority
                     .clone()
                     .map(|ca_path| {
-                        // TODO: we'll need to make a breaking change to the CAData enum so that we can
-                        // always use Paths instead of strings for these
-                        let resolved_path =
-                            kube_config_dir.join(&ca_path).to_string_lossy().to_string();
+                        let resolved_path = kube_config_dir.join(&ca_path);
                         log::debug!(
                             "Resolved cluster certificate-authority path '{}' to '{}'",
                             ca_path.display(),
-                            resolved_path
+                            resolved_path.display()
                         );
                         CAData::File(resolved_path)
                     })
@@ -401,7 +398,7 @@ mod test {
         let user_agent = "my-user-agent";
         let loaded =
             load_kubeconfig(user_agent.to_string(), file).expect("failed to load kubeconfig");
-        let expected = CAData::File("src/config/test-data/./dummy-ca.crt".to_string());
+        let expected = CAData::File(PathBuf::from("src/config/test-data/./dummy-ca.crt"));
         assert_eq!(Some(expected), loaded.ca_data);
     }
 }

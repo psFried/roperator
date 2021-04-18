@@ -125,7 +125,7 @@ impl Client {
                 }
             }
             Some(CAData::File(path)) => {
-                ssl.set_ca_file(path.as_str())?;
+                ssl.set_ca_file(&path)?;
             }
             None => {}
         }
