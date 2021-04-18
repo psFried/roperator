@@ -7,7 +7,10 @@ use crate::k8s_types::K8sType;
 
 use std::collections::HashMap;
 use std::io;
-use std::{path::Path, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 /// Default label that's added to all child resources, so that roperator can track the ownership of resources.
 /// The value is the `metadata.uid` of the parent.
@@ -173,7 +176,7 @@ impl OperatorConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CAData {
     /// The path to a file on disk that contains the CA certificate
-    File(String),
+    File(PathBuf),
     /// The base64 encoded certificate from a kubeconfig file. This value is already base64 encoded in the
     /// kubeconfig file, so you don't need to modify that value at all.
     Contents(String),
@@ -266,7 +269,7 @@ impl ClientConfig {
 
         let ca_file_path = Path::new(SERVICE_ACCOUNT_CA_PATH);
         let ca_data = if ca_file_path.exists() {
-            Some(CAData::File(SERVICE_ACCOUNT_CA_PATH.to_owned()))
+            Some(CAData::File(ca_file_path.to_owned()))
         } else {
             None
         };
