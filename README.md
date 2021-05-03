@@ -2,8 +2,7 @@
 
 [![roperator](https://docs.rs/roperator/badge.svg)](https://docs.rs/roperator) [![crates.io](https://img.shields.io/crates/v/roperator)](https://crates.io/crates/roperator)
 
-Roperator lets you easily write [Kubernetes Operators](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/) in Rust. Roperator handles all the mechanics and plumbing of watching and updating your resources. All you have to do is to write a function that returns the desired state of your resources. Roperator was heavily inspired by the excellent [Metacontroller](https://github.com/GoogleCloudPlatform/metacontroller) project, which it seems is no longer maintained.
-
+Roperator lets you easily write [Kubernetes Operators](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/) in Rust. Roperator handles all the mechanics and plumbing of watching and updating your resources. All you have to do is to write a function that returns the desired state of your resources. Roperator was heavily inspired by the excellent [Metacontroller](https://github.com/metacontroller/metacontroller) project.
 - [**The Guide**](https://psfried.github.io/roperator/)
 - [**API Documentation**](https://docs.rs/roperator/)
 
